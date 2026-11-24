@@ -184,6 +184,8 @@ grant usage on schema public to anon, authenticated;
 grant select, insert, update, delete on all tables in schema public to authenticated;
 grant usage, select on all sequences in schema public to authenticated;
 revoke all on public.app_config from anon, authenticated;
+grant all on all tables in schema public to service_role;
+grant usage, select on all sequences in schema public to service_role;
 alter table public.app_config enable row level security;          -- no policies: server only
 alter table public.profiles enable row level security;
 alter table public.crews enable row level security;
@@ -732,3 +734,8 @@ create policy pq_photos_insert on storage.objects for insert to authenticated
 select cron.unschedule(jobid) from cron.job where jobname in ('pq-tick', 'pq-weekly');
 select cron.schedule('pq-tick', '*/10 * * * *', 'select public.tick()');
 select cron.schedule('pq-weekly', '0 7 * * 0', 'select public.weekly_reminders()');  -- Sunday ~6 pm Sydney
+
+-- ───────────────────────── Push function address ─────────────────────────
+insert into public.app_config (key, value)
+values ('push_url', 'https://luszvyaenkpvocqbskrj.supabase.co/functions/v1/send-push')
+on conflict (key) do update set value = excluded.value;
