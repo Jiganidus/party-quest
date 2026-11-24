@@ -216,7 +216,7 @@ function screenNew() {
 let nqPicked = null, nqMin = 2;
 function screenNewQuest(kind) {
   const others = S.members.filter((p) => p.id !== me());
-  if (!nqPicked) { nqPicked = new Set(others.map((p) => p.id)); nqMin = Math.min(3, others.length + 1); }
+  if (!nqPicked) { nqPicked = new Set(others.map((p) => p.id)); nqMin = Math.max(2, Math.min(3, others.length + 1)); }
   const inv = nqPicked.size + 1;
   const now = new Date();
   const ev = new Date(now.getTime() + 3 * 864e5); ev.setHours(18, 0, 0, 0);
@@ -234,7 +234,7 @@ function screenNewQuest(kind) {
         : `<div class="muted">Your crew is empty. <a href="#/crew">Invite friends first</a>.</div>`}
       </div>
       <div class="row" style="background:#FFE7A8;border:2px solid var(--frame);border-radius:12px;padding:8px 10px">
-        <div class="grow"><div class="f">Minimum players</div><div class="small muted">Including you · ${inv} in the party</div></div>
+        <div class="grow"><div class="f">Minimum players</div><div class="small muted">Including you · at least 2 · ${inv} in the party</div></div>
         <button class="btn sm" data-act="nqMin" data-d="-1" aria-label="Fewer">−</button><div class="f" style="font-size:24px;width:28px;text-align:center">${nqMin}</div><button class="btn sm" data-act="nqMin" data-d="1" aria-label="More">+</button>
       </div>
       <div><label class="l" for="nq-dl">${kind === 'once' ? 'Answer by' : 'Date picks close'}</label><input id="nq-dl" type="datetime-local" class="inp" value="${localInput(dl)}"></div>
@@ -258,8 +258,8 @@ function partyList(q, statusFn) {
 
 function formedTools(q) {
   return `<div class="row" style="flex-wrap:wrap;gap:8px">
-    <button class="btn sm sun" data-act="gcal" data-id="${q.id}">Google Calendar</button>
-    <button class="btn sm" data-act="ics" data-id="${q.id}">Apple / other calendar</button>
+    <a class="btn sm sun" href="${SUPABASE_URL}/functions/v1/send-push?ics=${q.id}" target="_blank" rel="noopener">Add to my calendar</a>
+    <button class="btn sm" data-act="gcal" data-id="${q.id}">Google Calendar</button>
     <button class="btn sm go" data-act="wa" data-id="${q.id}">Share to WhatsApp</button>
   </div>`;
 }
@@ -390,7 +390,7 @@ async function screenPacts() {
   const [{ data: stats }, { data: debts }] = await Promise.all([sb.rpc('crew_stats', { p_crew: S.crew.id }), sb.from('debts').select('*').eq('crew_id', S.crew.id).order('created_at', { ascending: false })]);
   const active = d.pacts.filter((p) => p.status !== 'ended');
   paint(`<div class="stack"><h1 style="color:var(--paper)">Blood pacts</h1>
-    <a class="btn blood block" href="#/new-pact">Summon a new pact</a>
+    <a class="btn blood block" href="#/new-pact">Sign a new pact</a>
     <div class="win"><div class="bar red">Active pacts</div>${active.length ? active.map((p) => `<a class="item" href="#/pact/${p.id}"><span class="grow"><b>${esc(p.name)}</b><br><span class="small muted">Due ${fmtDay(p.due_date)} · ${pMembers(p.id).length} members</span></span><span class="chip red">${{ writing: 'Signing', sealed: 'Sealed', judging: 'Judgement' }[p.status]}</span></a>`).join('') : '<div class="pad muted">No active pacts.</div>'}</div>
     <div class="win"><div class="bar red">Naughty list <span style="margin-left:auto;font-size:12px">strikes from missed goals</span></div><div class="pad row" style="flex-wrap:wrap;gap:8px">
       ${(stats || []).map((s) => `<span style="flex:1;min-width:90px;text-align:center;background:#fff;border:2px dashed #C92A2A;border-radius:8px;padding:4px"><b>${esc(person(s.user_id).name)}</b><br>${s.strikes % 3} / 3 strikes</span>`).join('')}
@@ -404,7 +404,7 @@ function screenNewPact() {
   const others = S.members.filter((p) => p.id !== me());
   if (!npPicked) npPicked = new Set(others.map((p) => p.id));
   const due = new Date(Date.now() + 90 * 864e5);
-  paint(`<div class="stack">${header('Summon a blood pact', '#/pacts')}
+  paint(`<div class="stack">${header('Sign a new pact', '#/pacts')}
     <div class="win"><div class="bar red">The terms</div><div class="pad stack">
       <div><label class="l" for="np-name">Pact name</label><input id="np-name" class="inp" maxlength="60" placeholder="Summer Shred"></div>
       <div><label class="l" for="np-due">Due date</label><input id="np-due" type="date" class="inp" value="${ymd(due)}"></div>
@@ -412,7 +412,7 @@ function screenNewPact() {
       <div><label class="l" for="np-pen">Penalty</label><input id="np-pen" class="inp" value="3 strikes = buy the crew dinner"></div>
       <div><span class="l">Members</span>${others.length ? `<div class="row" style="flex-wrap:wrap;gap:12px">${others.map((p) => `<button type="button" data-act="npToggle" data-id="${p.id}" aria-pressed="${npPicked.has(p.id)}" style="background:none;border:0;padding:0;cursor:pointer;display:flex;flex-direction:column;align-items:center;font:800 12px Nunito;color:var(--ink);opacity:${npPicked.has(p.id) ? 1 : 0.45}"><span style="border:3px solid ${npPicked.has(p.id) ? '#C92A2A' : 'transparent'};border-radius:50%;display:block">${avatar(p.hair, 44)}</span>${esc(p.name)}</button>`).join('')}</div>` : '<div class="muted">Invite friends to your crew first.</div>'}</div>
     </div></div>
-    <button class="btn blood block" data-act="npGo" style="font-size:20px">Summon the pact</button>
+    <button class="btn blood block" data-act="npGo" style="font-size:20px">Send the pact to sign</button>
   </div>`, 'pacts', true);
 }
 
@@ -557,11 +557,12 @@ const A = {
       location.hash = obMode === 'new' ? '#/crew' : '#/'; await boot();
     } catch (e) { el.disabled = false; if (e.message && !document.querySelector('.toast')) toast(e.message); }
   },
-  nqToggle(el) { const id = el.dataset.id; nqPicked.has(id) ? nqPicked.delete(id) : nqPicked.add(id); nqMin = Math.min(nqMin, nqPicked.size + 1); keepInputs(() => render()); },
-  nqMin(el) { nqMin = Math.max(1, Math.min(nqPicked.size + 1, nqMin + Number(el.dataset.d))); keepInputs(() => render()); },
+  nqToggle(el) { const id = el.dataset.id; nqPicked.has(id) ? nqPicked.delete(id) : nqPicked.add(id); nqMin = Math.max(2, Math.min(nqMin, nqPicked.size + 1)); keepInputs(() => render()); },
+  nqMin(el) { nqMin = Math.max(2, Math.min(Math.max(2, nqPicked.size + 1), nqMin + Number(el.dataset.d))); keepInputs(() => render()); },
   async nqPost(el) {
     const kind = el.dataset.k, v = (id) => document.getElementById(id)?.value;
     const title = v('nq-title')?.trim(); if (!title) return toast('Name the Party Quest');
+    if (!nqPicked.size) return toast('Invite at least one friend');
     if (!v('nq-dl')) return toast('Set the answer-by time');
     el.disabled = true;
     try {
@@ -637,7 +638,7 @@ const A = {
   async settle(el) { await rpc('settle_debt', { p_debt: el.dataset.id }); toast('Debt settled'); render(); },
   async inviteWa() { const link = `${location.origin}${location.pathname}?crew=${S.crew.code}`; window.open(`https://wa.me/?text=${encodeURIComponent(`Join my crew "${S.crew.name}" on Party Quest ⚔️\n${link}\nCrew code: ${S.crew.code}`)}`, '_blank'); },
   async copyLink(el) { await navigator.clipboard?.writeText(el.dataset.link); toast('Invite link copied'); },
-  async switchCrew(el) { localStorage.setItem('pq.crew', el.dataset.id); S.crew = S.crews.find((c) => c.id === el.dataset.id); await loadCrew(); location.hash = '#/'; render(); },
+  async switchCrew(el) { localStorage.setItem('pq.crew', el.dataset.id); S.crew = S.crews.find((c) => c.id === el.dataset.id); await loadCrew(); goLive(); location.hash = '#/'; render(); },
   async joinCrew() { const c = await rpc('join_crew', { p_code: document.getElementById('cr-code').value }); localStorage.setItem('pq.crew', c.id); await boot(); toast('Joined ' + c.name); },
   async newCrew() { const n = document.getElementById('cr-name').value.trim(); if (!n) return toast('Name the crew'); const c = await rpc('create_crew', { p_name: n }); localStorage.setItem('pq.crew', c.id); await boot(); },
   heroHair(el) { document.querySelectorAll('[data-act="heroHair"]').forEach((b) => b.classList.toggle('on', b === el)); el.closest('.win').dataset.hair = el.dataset.h; },
@@ -651,7 +652,7 @@ const CHANGE = {
   ciPhoto(el) { const f = el.files[0]; document.getElementById('ci-photo-label').textContent = f ? `📷 ${f.name}` : 'Tap to add a photo'; },
 };
 function keepInputs(fn) { const vals = {}; app.querySelectorAll('input,select,textarea').forEach((i) => { if (i.id && i.type !== 'file') vals[i.id] = i.value; }); fn(); setTimeout(() => Object.entries(vals).forEach(([k, v]) => { const i = document.getElementById(k); if (i) i.value = v; }), 0); }
-document.addEventListener('click', (e) => { const el = e.target.closest('[data-act]'); if (!el || !A[el.dataset.act]) return; e.preventDefault(); Promise.resolve(A[el.dataset.act](el)).catch(() => {}); });
+document.addEventListener('click', (e) => { const el = e.target.closest('[data-act]'); if (!el || !A[el.dataset.act]) return; e.preventDefault(); el.classList.add('busy'); Promise.resolve(A[el.dataset.act](el)).catch(() => {}).finally(() => el.classList.remove('busy')); });
 document.addEventListener('change', (e) => { const el = e.target.closest('[data-change]'); if (el && CHANGE[el.dataset.change]) Promise.resolve(CHANGE[el.dataset.change](el)).catch(() => {}); });
 
 // ───────────── router ─────────────
@@ -679,8 +680,38 @@ async function render() {
   } catch (e) { console.error(e); paint(`<div class="win pad">Something went wrong: ${esc(e.message)}</div>`, 'home'); }
 }
 async function refresh() { await loadCrew(); await render(); }
-window.addEventListener('hashchange', async () => { if (!location.hash.startsWith('#/new-quest')) nqPicked = null; if (!location.hash.startsWith('#/new-pact')) npPicked = null; await refresh(); });
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.crew) refresh(); });
+const isEditing = () => { const a = document.activeElement; return (a && /INPUT|TEXTAREA|SELECT/.test(a.tagName) && a.type !== 'file') || /^#\/(new-quest|new-pact|checkin)/.test(location.hash); };
+// Show the screen straight away from what's already loaded, then quietly refresh in the background.
+async function backgroundRefresh() {
+  const before = JSON.stringify(S.d);
+  await loadCrew();
+  if (JSON.stringify(S.d) === before) return;
+  if (isEditing()) { document.querySelector('.tabs')?.replaceWith(Object.assign(document.createElement('div'), { innerHTML: tabs(currentTab()) }).firstElementChild); return; }
+  await render();
+}
+const currentTab = () => ({ '': 'home', quests: 'quests', 'new-quest': 'quests', quest: 'quests', pacts: 'pacts', 'new-pact': 'pacts', pact: 'pacts', checkin: 'pacts', archive: 'archive', alerts: 'alerts' }[location.hash.replace(/^#\/?/, '').split(/[/?]/)[0]] || 'home');
+window.addEventListener('hashchange', async () => {
+  if (!location.hash.startsWith('#/new-quest')) nqPicked = null; if (!location.hash.startsWith('#/new-pact')) npPicked = null;
+  if (!S.d) return refresh();
+  await render(); backgroundRefresh();
+});
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.crew) backgroundRefresh(); });
+
+// Live updates: when anyone in the crew changes something, this screen updates by itself.
+let liveChannel = null, liveTimer = null;
+async function goLive() {
+  if (liveChannel) { sb.removeChannel(liveChannel); liveChannel = null; }
+  if (!S.crew) return;
+  const cid = S.crew.id, ping = () => { clearTimeout(liveTimer); liveTimer = setTimeout(backgroundRefresh, 350); };
+  try { await sb.realtime.setAuth(); } catch {}
+  liveChannel = sb.channel('crew-' + cid)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'quests', filter: `crew_id=eq.${cid}` }, ping)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'pacts', filter: `crew_id=eq.${cid}` }, ping)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'quest_members' }, ping)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'crew_members', filter: `crew_id=eq.${cid}` }, ping)
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${me()}` }, ping)
+    .subscribe();
+}
 
 async function boot() {
   const url = new URL(location.href);
@@ -703,6 +734,7 @@ async function boot() {
   if (!S.profile || !S.crew) return screenOnboard();
   await loadCrew();
   await render();
+  goLive();
 }
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});

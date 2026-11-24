@@ -52,6 +52,7 @@ create table if not exists public.quests (
   created_at timestamptz not null default now()
 );
 create index if not exists quests_crew_idx on public.quests(crew_id);
+alter table public.quests add column if not exists touched_at timestamptz not null default now();
 
 create table if not exists public.quest_members (
   quest_id uuid not null references public.quests on delete cascade,
@@ -98,6 +99,7 @@ create table if not exists public.pacts (
   status text not null default 'writing' check (status in ('writing','sealed','judging','ended')),
   created_at timestamptz not null default now()
 );
+alter table public.pacts add column if not exists touched_at timestamptz not null default now();
 
 create table if not exists public.pact_members (
   pact_id uuid not null references public.pacts on delete cascade,
@@ -308,6 +310,7 @@ declare v_id uuid := gen_random_uuid(); v_members uuid[]; v_start date;
 begin
   if not is_member(p_crew) then raise exception 'Not in this crew'; end if;
   if p_deadline <= now() then raise exception 'The answer-by time must be in the future'; end if;
+  if p_min < 2 then raise exception 'Minimum players must be at least 2 (you plus one friend)'; end if;
   select array_agg(distinct m) into v_members from unnest(coalesce(p_members, '{}') || auth.uid()) m
     where exists (select 1 from crew_members where crew_id = p_crew and user_id = m);
   if p_min > coalesce(array_length(v_members, 1), 0) then raise exception 'Minimum players is more than the party size'; end if;
@@ -454,6 +457,7 @@ begin
   if exists (select 1 from unnest(p_dates) d where d < r.period_start or d > r.period_end) then raise exception 'Pick days inside the period'; end if;
   insert into date_picks (quest_id, user_id, round, dates) values (p_quest, auth.uid(), r.round, coalesce(p_dates, '{}'))
   on conflict (quest_id, user_id, round) do update set dates = excluded.dates, created_at = now();
+  update quests set touched_at = now() where id = p_quest;
   select count(*) into v_need from quest_members where quest_id = p_quest;
   select count(*) into v_have from date_picks where quest_id = p_quest and round = r.round;
   if v_have >= v_need then return evaluate_round(p_quest, false); end if;
@@ -481,6 +485,7 @@ begin
   if r.status <> 'gathering' or r.phase <> 'vote' or not (p_date = any(r.shortlist)) then raise exception 'Voting is closed'; end if;
   insert into date_votes (quest_id, user_id, vote) values (p_quest, auth.uid(), p_date)
   on conflict (quest_id, user_id) do update set vote = excluded.vote;
+  update quests set touched_at = now() where id = p_quest;
   if (select count(*) from date_votes where quest_id = p_quest) >= (select count(*) from quest_members where quest_id = p_quest) then
     perform finalize_vote(p_quest);
   end if;
@@ -507,6 +512,7 @@ begin
   if r.id is null or not is_member(r.crew_id) then raise exception 'Party Quest not found'; end if;
   if split_part(p_path, '/', 1) <> auth.uid()::text then raise exception 'Bad photo path'; end if;
   insert into quest_photos (quest_id, user_id, path) values (p_quest, auth.uid(), p_path);
+  update quests set touched_at = now() where id = p_quest;
 end $$;
 
 -- ───────────────────────── Blood pacts ─────────────────────────
@@ -521,7 +527,7 @@ begin
   insert into pacts (id, crew_id, created_by, name, due_date, proof_type, penalty)
   values (v_id, p_crew, auth.uid(), trim(p_name), p_due, coalesce(p_proof, 'photo'), coalesce(nullif(trim(p_penalty), ''), '3 strikes = buy the crew dinner'));
   insert into pact_members (pact_id, user_id) select v_id, m from unnest(v_members) m;
-  perform notify(array_remove(v_members, auth.uid()), pname(auth.uid()) || ' summons you to a blood pact',
+  perform notify(array_remove(v_members, auth.uid()), pname(auth.uid()) || ' invites you to sign a blood pact',
     trim(p_name) || ' · due ' || fmt_date(p_due) || '. Write your goal to seal it.', '#/pact/' || v_id);
   return v_id;
 end $$;
@@ -536,6 +542,7 @@ begin
   if char_length(trim(coalesce(p_goal, ''))) < 3 then raise exception 'Write a real goal'; end if;
   update pact_members set goal = trim(p_goal), signed_at = now() where pact_id = p_pact and user_id = auth.uid();
   if not found then raise exception 'You are not in this pact'; end if;
+  update pacts set touched_at = now() where id = p_pact;
   if not exists (select 1 from pact_members where pact_id = p_pact and signed_at is null) then
     update pacts set status = 'sealed' where id = p_pact;
     perform notify(pact_uids(p_pact), 'The pact is sealed: ' || p.name, 'Everyone has signed. Read the terms.', '#/pact/' || p_pact);
@@ -572,6 +579,7 @@ begin
   if p_photo is not null and split_part(p_photo, '/', 1) <> auth.uid()::text then raise exception 'Bad photo path'; end if;
   insert into checkins (pact_id, user_id, photo_path, value, note)
   values (p_pact, auth.uid(), p_photo, nullif(trim(p_value), ''), nullif(trim(p_note), ''));
+  update pacts set touched_at = now() where id = p_pact;
 end $$;
 
 create or replace function public.start_judging(p_pact uuid) returns void
@@ -601,6 +609,7 @@ begin
   if p_result not in ('hit','miss') then raise exception 'Bad result'; end if;
   update pact_members set result = p_result where pact_id = p_pact and user_id = auth.uid() and result = 'pending';
   if not found then raise exception 'Already marked'; end if;
+  update pacts set touched_at = now() where id = p_pact;
   if p_result = 'miss' then
     select count(*) into v_misses from pact_members m join pacts x on x.id = m.pact_id
       where x.crew_id = p.crew_id and m.user_id = auth.uid() and m.result = 'miss';
@@ -764,3 +773,17 @@ select cron.schedule('pq-weekly', '0 7 * * 0', 'select public.weekly_reminders()
 insert into public.app_config (key, value)
 values ('push_url', 'https://luszvyaenkpvocqbskrj.supabase.co/functions/v1/send-push')
 on conflict (key) do update set value = excluded.value;
+
+-- ───────────────────────── Live updates (Supabase Realtime) ─────────────────────────
+do $$
+declare t text;
+begin
+  if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+    foreach t in array array['quests','pacts','quest_members','crew_members','notifications'] loop
+      begin
+        execute format('alter publication supabase_realtime add table public.%I', t);
+      exception when duplicate_object then null;
+      end;
+    end loop;
+  end if;
+end $$;

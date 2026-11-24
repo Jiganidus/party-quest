@@ -72,3 +72,4 @@ textarea.inp{resize:vertical}
 body.night h1{color:var(--paper)}
 body.night #app>.stack>.muted{color:#E9D8FD}
 body.night .cloud{display:none}
+.busy{opacity:.6;transform:translateY(2px)}
