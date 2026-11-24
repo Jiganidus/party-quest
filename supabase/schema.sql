@@ -180,6 +180,10 @@ create or replace function public.fmt_date(d date) returns text
 language sql immutable as $$ select to_char(d, 'Dy FMDD Mon') $$;
 
 -- ───────────────────────── Row level security ─────────────────────────
+grant usage on schema public to anon, authenticated;
+grant select, insert, update, delete on all tables in schema public to authenticated;
+grant usage, select on all sequences in schema public to authenticated;
+revoke all on public.app_config from anon, authenticated;
 alter table public.app_config enable row level security;          -- no policies: server only
 alter table public.profiles enable row level security;
 alter table public.crews enable row level security;
