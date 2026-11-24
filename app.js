@@ -100,8 +100,8 @@ function questLog() {
     if (q.kind === 'once' && mine.response === 'pending') items.push({ m: '!', t: `${q.title} — you're invited`, s: `From ${person(q.created_by).name} · answer by ${fmtDT(q.deadline)}`, h: `#/quest/${q.id}` });
     else if (q.kind === 'once') items.push({ m: '?', t: `${q.title} — gathering`, s: `${qMembers(q.id).filter((x) => x.response === 'accept').length} of ${q.min_players} needed`, h: `#/quest/${q.id}` });
     else if (q.phase === 'pick' && !d.picks.some((p) => p.quest_id === q.id && p.round === q.round)) items.push({ m: '!', t: `${q.title} — pick your dates`, s: `Round ${q.round} · closes ${fmtDT(q.deadline)}`, h: `#/quest/${q.id}` });
-    else if (q.phase === 'pick') items.push({ m: '?', t: `${q.title} — waiting on others`, s: `You've fired for round ${q.round}`, h: `#/quest/${q.id}` });
-    else if (q.phase === 'vote' && !d.votes.some((v) => v.quest_id === q.id)) items.push({ m: '!', t: `${q.title} — vote for a date`, s: 'Multiple hits!', h: `#/quest/${q.id}` });
+    else if (q.phase === 'pick') items.push({ m: '?', t: `${q.title} — waiting on others`, s: `You've picked for round ${q.round}`, h: `#/quest/${q.id}` });
+    else if (q.phase === 'vote' && !d.votes.some((v) => v.quest_id === q.id)) items.push({ m: '!', t: `${q.title} — vote for a date`, s: 'A few dates work', h: `#/quest/${q.id}` });
   }
   for (const p of d.pacts) {
     const mine = myPM(p.id); if (!mine) continue;
@@ -117,7 +117,7 @@ function questLog() {
 function tabs(active) {
   const t = (k, href, label, ic, dot = '') => `<a href="${href}" class="${active === k ? 'on' : ''}">${icon(ic)}${label}${dot}</a>`;
   const n = S.d?.unread || 0;
-  return `<nav class="tabs">${t('home', '#/', 'Home', 'home')}${t('quests', '#/quests', 'Quests', 'quest')}${t('pacts', '#/pacts', 'Pacts', 'pact')}${t('archive', '#/archive', 'Archive', 'archive')}${t('alerts', '#/alerts', 'Alerts', 'bell', n ? `<span class="dot">${n}</span>` : '')}</nav>`;
+  return `<nav class="tabs">${t('home', '#/', 'Home', 'home')}${t('quests', '#/quests', 'Party Quests', 'quest')}${t('pacts', '#/pacts', 'Pacts', 'pact')}${t('archive', '#/archive', 'Archive', 'archive')}${t('alerts', '#/alerts', 'Alerts', 'bell', n ? `<span class="dot">${n}</span>` : '')}</nav>`;
 }
 function paint(html, active, night = false) {
   document.body.classList.toggle('night', night);
@@ -177,25 +177,25 @@ function screenHome() {
       <div class="grow"><div class="f" style="font-size:20px">${esc(S.profile.name)}</div><a class="muted" href="#/crew" style="text-decoration:none">${esc(S.crew.name)} · ${S.members.length} adventurers ›</a></div>
       <div class="center f"><div style="font-size:22px;color:#C2410C">×${best}</div><div class="small">best streak</div></div>
     </div>
-    <div class="win"><div class="bar">Quest log ${log.filter((i) => i.m === '!').length ? `<span class="chip" style="margin-left:auto;background:#C2410C;color:#fff;border-color:#C2410C">${log.filter((i) => i.m === '!').length} new</span>` : ''}</div>
-      ${log.length ? log.map((i) => `<a class="item" href="${i.h}"><span class="mk ${i.m === '?' ? 'q' : ''}">${i.m}</span><span class="grow"><b>${esc(i.t)}</b><br><span class="small muted">${esc(i.s)}</span></span><span class="f">›</span></a>`).join('') : `<div class="pad muted">Nothing needs you right now. Post a quest with the + button.</div>`}
+    <div class="win"><div class="bar">Party Quest log ${log.filter((i) => i.m === '!').length ? `<span class="chip" style="margin-left:auto;background:#C2410C;color:#fff;border-color:#C2410C">${log.filter((i) => i.m === '!').length} new</span>` : ''}</div>
+      ${log.length ? log.map((i) => `<a class="item" href="${i.h}"><span class="mk ${i.m === '?' ? 'q' : ''}">${i.m}</span><span class="grow"><b>${esc(i.t)}</b><br><span class="small muted">${esc(i.s)}</span></span><span class="f">›</span></a>`).join('') : `<div class="pad muted">Nothing needs you right now. Post a Party Quest with the + button.</div>`}
     </div>
-    <div class="win"><div class="bar">Next adventures</div>
-      ${upcoming.length ? upcoming.slice(0, 4).map((q) => { const dt = new Date(q.starts_at); return `<a class="item" href="#/quest/${q.id}"><div class="center f" style="background:#4A6CF7;color:#fff;border:2px solid var(--ink);border-radius:10px;padding:3px 8px;line-height:1.1"><div class="small">${dt.toLocaleDateString('en-AU', { weekday: 'short' }).toUpperCase()}</div><div style="font-size:20px">${dt.getDate()}</div></div><span class="grow"><b>${esc(q.title)}</b><br><span class="small muted">${dt.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' })}${q.location ? ' · ' + esc(q.location) : ''} · ${qMembers(q.id).filter((m) => m.response === 'accept').length} going</span></span></a>`; }).join('') : `<div class="pad muted">No adventures locked in yet.</div>`}
+    <div class="win"><div class="bar">Next PQ</div>
+      ${upcoming.length ? upcoming.slice(0, 4).map((q) => { const dt = new Date(q.starts_at); return `<a class="item" href="#/quest/${q.id}"><div class="center f" style="background:#4A6CF7;color:#fff;border:2px solid var(--ink);border-radius:10px;padding:3px 8px;line-height:1.1"><div class="small">${dt.toLocaleDateString('en-AU', { weekday: 'short' }).toUpperCase()}</div><div style="font-size:20px">${dt.getDate()}</div></div><span class="grow"><b>${esc(q.title)}</b><br><span class="small muted">${dt.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' })}${q.location ? ' · ' + esc(q.location) : ''} · ${qMembers(q.id).filter((m) => m.response === 'accept').length} going</span></span></a>`; }).join('') : `<div class="pad muted">No PQs locked in yet.</div>`}
     </div>
     ${streaks.length || activePacts.length ? `<div class="win"><div class="bar">Streaks &amp; pacts</div><div class="pad row" style="flex-wrap:wrap;gap:8px">
       ${streaks.map((q) => `<a class="chip" href="#/quest/${q.id}">${esc(q.title)} ×${q.streak}</a>`).join('')}
       ${activePacts.map((p) => `<a class="chip red" href="#/pact/${p.id}">${esc(p.name)} · ${p.status === 'writing' ? 'signing' : p.status === 'judging' ? 'judgement' : `due ${fmtDay(p.due_date)}`}</a>`).join('')}
     </div></div>` : ''}
-    <div class="muted center small">${completed} quests completed together</div>
-  </div><a class="fab" href="#/new" aria-label="Post a quest or pact">+</a>`, 'home');
+    <div class="muted center small">${completed} Party Quests completed together</div>
+  </div><a class="fab" href="#/new" aria-label="Post a Party Quest or pact">+</a>`, 'home');
 }
 
 function screenQuests() {
   const d = S.d;
   const active = d.quests.filter((q) => ['gathering', 'formed'].includes(q.status));
-  paint(`<div class="stack"><h1>Quests</h1>
-    <div class="seg"><a href="#/new-quest?k=once" class="on">+ One-off quest</a><a href="#/new-quest?k=recurring">+ Recurring</a></div>
+  paint(`<div class="stack"><h1>Party Quests</h1>
+    <div class="seg"><a href="#/new-quest?k=once" class="on">+ One-off</a><a href="#/new-quest?k=recurring">+ Recurring</a></div>
     <div class="win"><div class="bar">Active</div>${active.length ? active.map((q) => questRow(q)).join('') : '<div class="pad muted">No active quests.</div>'}</div>
   </div>`, 'quests');
 }
@@ -207,8 +207,8 @@ function questRow(q) {
 
 function screenNew() {
   paint(`<div class="stack">${header('What are we doing?', '#/')}
-    <a class="win item pad" href="#/new-quest?k=once" style="border:3px solid var(--frame)"><span class="mk">!</span><span class="grow"><b class="f" style="font-size:18px">One-off quest</b><br><span class="muted">Dinner on Friday, a beach day — one event.</span></span></a>
-    <a class="win item pad" href="#/new-quest?k=recurring" style="border:3px solid var(--frame)"><span class="mk">↻</span><span class="grow"><b class="f" style="font-size:18px">Recurring quest</b><br><span class="muted">Monthly BBQ, quarterly catch-up — builds a streak.</span></span></a>
+    <a class="win item pad" href="#/new-quest?k=once" style="border:3px solid var(--frame)"><span class="mk">!</span><span class="grow"><b class="f" style="font-size:18px">One-off Party Quest</b><br><span class="muted">Dinner on Friday, a beach day — one event.</span></span></a>
+    <a class="win item pad" href="#/new-quest?k=recurring" style="border:3px solid var(--frame)"><span class="mk">↻</span><span class="grow"><b class="f" style="font-size:18px">Recurring Party Quest</b><br><span class="muted">Monthly BBQ, quarterly catch-up — builds a streak.</span></span></a>
     <a class="win item pad" href="#/new-pact" style="border:3px solid var(--frame)"><span class="mk" style="background:#F8C9C9">${icon('pact', 16, '#7f1d1d')}</span><span class="grow"><b class="f" style="font-size:18px">Blood pact</b><br><span class="muted">Shared goals with weekly proof.</span></span></a>
   </div>`, 'home');
 }
@@ -221,10 +221,10 @@ function screenNewQuest(kind) {
   const now = new Date();
   const ev = new Date(now.getTime() + 3 * 864e5); ev.setHours(18, 0, 0, 0);
   const dl = new Date(now.getTime() + 2 * 864e5); dl.setHours(18, 0, 0, 0);
-  paint(`<div class="stack">${header(kind === 'once' ? 'Post a quest' : 'Recurring quest', '#/new')}
+  paint(`<div class="stack">${header(kind === 'once' ? 'Post a Party Quest' : 'Recurring Party Quest', '#/new')}
     <div class="seg"><a href="#/new-quest?k=once" class="${kind === 'once' ? 'on' : ''}">One-off</a><a href="#/new-quest?k=recurring" class="${kind === 'recurring' ? 'on' : ''}">Recurring</a></div>
-    <div class="win"><div class="bar">Quest scroll</div><div class="pad stack">
-      <div><label class="l" for="nq-title">What's the quest?</label><input id="nq-title" class="inp" maxlength="80" placeholder="${kind === 'once' ? 'Friday dinner' : 'Monthly BBQ'}"></div>
+    <div class="win"><div class="bar">Mission Brief</div><div class="pad stack">
+      <div><label class="l" for="nq-title">What's the Party Quest?</label><input id="nq-title" class="inp" maxlength="80" placeholder="${kind === 'once' ? 'Friday dinner' : 'Monthly BBQ'}"></div>
       ${kind === 'once'
         ? `<div><label class="l" for="nq-when">When</label><input id="nq-when" type="datetime-local" class="inp" value="${localInput(ev)}"></div>`
         : `<div class="row"><div class="grow"><label class="l" for="nq-rep">Repeats</label><select id="nq-rep" class="inp"><option value="1">Monthly</option><option value="3">Quarterly</option></select></div><div style="width:120px"><label class="l" for="nq-time">Usual time</label><input id="nq-time" type="time" class="inp" value="18:00"></div></div>`}
@@ -240,14 +240,14 @@ function screenNewQuest(kind) {
       <div><label class="l" for="nq-dl">${kind === 'once' ? 'Answer by' : 'Date picks close'}</label><input id="nq-dl" type="datetime-local" class="inp" value="${localInput(dl)}"></div>
       ${kind === 'recurring' ? '<div class="muted small">Everyone marks the days they can do in the next period. The app finds the date that works.</div>' : ''}
     </div></div>
-    <button class="btn go block" data-act="nqPost" data-k="${kind}" style="font-size:20px">Post quest!</button>
+    <button class="btn go block" data-act="nqPost" data-k="${kind}" style="font-size:20px">Post Party Quest!</button>
   </div>`, 'quests');
 }
 
 // ───────────── screens: quest detail ─────────────
 async function screenQuest(id) {
   const q = S.d.quests.find((x) => x.id === id);
-  if (!q) return paint(`<div class="stack">${header('Quest', '#/')}<div class="win pad">This quest isn't in your current crew.</div></div>`, 'quests');
+  if (!q) return paint(`<div class="stack">${header('Party Quest', '#/')}<div class="win pad">This Party Quest isn't in your current crew.</div></div>`, 'quests');
   return q.kind === 'once' ? screenOnce(q) : screenBattleship(q);
 }
 
@@ -266,9 +266,23 @@ function formedTools(q) {
 
 async function photoSection(q) {
   const { data } = await sb.from('quest_photos').select('*').eq('quest_id', q.id).order('created_at');
-  return `<div class="win"><div class="bar">Quest album</div><div class="pad stack">
+  return `<div class="win"><div class="bar">Party Quest album</div><div class="pad stack">
     ${data?.length ? `<div class="photos">${data.map((p) => `<a href="${photoUrl(p.path)}" target="_blank" rel="noopener"><img src="${photoUrl(p.path)}" alt="Photo from ${esc(person(p.user_id).name)}" loading="lazy"></a>`).join('')}</div>` : '<div class="muted">No photos yet.</div>'}
     <label class="btn sm" style="align-self:flex-start">${icon('camera', 16)} Add photos<input type="file" accept="image/*" multiple hidden data-change="questPhotos" data-id="${q.id}"></label>
+  </div></div>`;
+}
+
+function organiserBox(q, ms) {
+  const props = ms.filter((m) => m.response === 'propose' && m.proposed_at);
+  return `<div class="win"><div class="bar">Organiser controls</div><div class="pad stack">
+    ${props.length ? props.map((m) => `<div class="stack" style="gap:6px;border-bottom:2px dashed var(--line);padding-bottom:10px">
+      <div><b>${esc(person(m.user_id).name)}</b> suggests <b>${fmtDT(m.proposed_at)}</b>${m.comment ? `<div class="small muted">“${esc(m.comment)}”</div>` : ''}</div>
+      <button class="btn sun" data-act="reschedule" data-id="${q.id}" data-t="${m.proposed_at}" data-from="${m.user_id}">Accept this time &amp; re-send invites</button>
+    </div>`).join('') : '<div class="small muted">No new times proposed yet.</div>'}
+    <div><label class="l" for="rs-time">Or move it to another time</label>
+      <div class="row"><input id="rs-time" type="datetime-local" class="inp grow" value="${localInput(new Date(q.starts_at))}"><button class="btn sm" data-act="reschedule" data-id="${q.id}">Re-send</button></div></div>
+    <div class="small muted">Everyone else will be asked to answer again.</div>
+    <button class="btn no sm" data-act="cancelQuest" data-id="${q.id}" style="align-self:center">Cancel this Party Quest</button>
   </div></div>`;
 }
 
@@ -276,9 +290,9 @@ async function screenOnce(q) {
   const ms = qMembers(q.id), mine = myQM(q.id), org = person(q.created_by);
   const yes = ms.filter((m) => m.response === 'accept').length;
   const st = { accept: ['Accepted', 'ok'], decline: ['Declined', 'bad'], propose: ['Proposed new', ''], pending: ['Thinking…', 'wait'] };
-  const banner = { formed: ['Party formed!', '#2B8A3E', '#EBFBEE'], failed: ['Party not formed', '#C92A2A', '#FFE3E3'], cancelled: ['Cancelled by the organiser', '#C92A2A', '#FFE3E3'], done: ['Quest complete', '#2B8A3E', '#EBFBEE'] }[q.status];
+  const banner = { formed: ['Party formed!', '#2B8A3E', '#EBFBEE'], failed: ['Party not formed', '#C92A2A', '#FFE3E3'], cancelled: ['Cancelled by the organiser', '#C92A2A', '#FFE3E3'], done: ['Party Quest complete', '#2B8A3E', '#EBFBEE'] }[q.status];
   const showPhotos = ['formed', 'done'].includes(q.status) && new Date(q.starts_at) < new Date(Date.now() + 36e5);
-  paint(`<div class="stack">${header('Quest', '#/')}
+  paint(`<div class="stack">${header('Party Quest', '#/')}
     <div class="win">
       <div class="row pad" style="align-items:flex-start">
         <div class="center" style="flex:none">${avatar(org.hair, 64)}<div class="chip" style="background:var(--ink);color:var(--paper)">${esc(org.name)}</div></div>
@@ -295,14 +309,14 @@ async function screenOnce(q) {
       <div class="prog"><div style="width:${Math.min(100, Math.round((yes / q.min_players) * 100))}%"></div></div>
       ${partyList(q, (m) => st[m.response])}
     </div></div>
-    ${mine && q.status === 'gathering' ? `<div class="win pad stack">
+    ${q.created_by === me() && ['gathering', 'formed'].includes(q.status) ? organiserBox(q, ms) : ''}
+    ${mine && q.status === 'gathering' && q.created_by !== me() ? `<div class="win pad stack">
       <div class="f">${mine.response === 'pending' ? 'Your answer' : 'Change your answer'}</div>
       <input id="rq-comment" class="inp" maxlength="200" placeholder="Say something (optional)" value="${esc(mine.comment || '')}">
       <div id="rq-prop-wrap" hidden><label class="l" for="rq-prop">Your counter-offer</label><input id="rq-prop" type="datetime-local" class="inp" value="${localInput(new Date(q.starts_at))}"></div>
       <div class="row"><button class="btn go grow" data-act="respond" data-r="accept" data-id="${q.id}">Accept</button><button class="btn no grow" data-act="respond" data-r="decline" data-id="${q.id}">Decline</button><button class="btn sun grow" data-act="respond" data-r="propose" data-id="${q.id}">Propose new</button></div>
     </div>` : ''}
     ${showPhotos ? await photoSection(q) : ''}
-    ${q.created_by === me() && ['gathering', 'formed'].includes(q.status) ? `<button class="btn no sm" data-act="cancelQuest" data-id="${q.id}" style="align-self:center">Cancel this quest</button>` : ''}
   </div>`, 'quests');
 }
 
@@ -343,24 +357,24 @@ async function screenBattleship(q) {
   const waiting = ms.filter((m) => !firedIds.has(m.user_id)).map((m) => person(m.user_id).name);
   let panel = '';
   if (q.status === 'gathering' && q.phase === 'pick') {
-    panel = `${q.round > 1 ? `<div class="win pad" style="background:#FFE3E3"><div class="f" style="font-size:18px;color:#C92A2A">Miss! Round ${q.round - 1} found no date</div><div class="small">Names on each day show who could make it last round. Pick again.</div></div>` : ''}
-      ${myQM(q.id) ? `<button class="btn orange block" data-act="fire" data-id="${q.id}" style="font-size:20px">${firedIds.has(me()) ? 'Update my picks' : 'Fire!'} (${sel.size} picked)</button>` : ''}
-      <div class="muted center small">${waiting.length ? `Waiting on: ${esc(waiting.join(', '))}` : 'Everyone has fired.'}</div>`;
+    panel = `${q.round > 1 ? `<div class="win pad" style="background:#FFE3E3"><div class="f" style="font-size:18px;color:#C92A2A">No match in round ${q.round - 1}</div><div class="small">Names on each day show who could make it last round. Pick again.</div></div>` : ''}
+      ${myQM(q.id) ? `<button class="btn orange block" data-act="fire" data-id="${q.id}" style="font-size:20px">${firedIds.has(me()) ? 'Update my picks' : 'Submit my picks'} (${sel.size} picked)</button>` : ''}
+      <div class="muted center small">${waiting.length ? `Waiting on: ${esc(waiting.join(', '))}` : 'Everyone has picked.'}</div>`;
   } else if (q.status === 'gathering' && q.phase === 'vote') {
     const counts = {}; (votes || []).forEach((v) => { (counts[v.vote] = counts[v.vote] || []).push(person(v.user_id).name); });
     const myVote = (votes || []).find((v) => v.user_id === me())?.vote;
-    panel = `<div class="win pad stack"><div class="f" style="font-size:20px;color:#C2410C">Multiple hits! Vote for one</div>
+    panel = `<div class="win pad stack"><div class="f" style="font-size:20px;color:#C2410C">A few dates work — vote for one</div>
       ${(q.shortlist || []).map((d) => `<button class="btn ${myVote === d ? 'sun' : ''}" data-act="vote" data-id="${q.id}" data-d="${d}">${fmtDay(d)} · ${(counts[d] || []).length} vote${(counts[d] || []).length === 1 ? '' : 's'}${counts[d] ? ` <span class="small">(${esc(counts[d].join(', '))})</span>` : ''}</button>`).join('')}
       <div class="small muted">Voting closes ${fmtDT(q.deadline)}. No agreement? The earliest most-voted date wins.</div></div>`;
   } else if (q.status === 'formed') {
-    panel = `<div class="win pad center" style="background:#EBFBEE"><div class="f" style="font-size:24px;color:#2B8A3E">Hit! ${fmtDT(q.starts_at)}</div><div class="small" style="margin:4px 0 8px">Locked in · ${ms.filter((m) => m.response === 'accept').length} going · streak ×${q.streak + 1} if it happens</div>${formedTools(q)}</div>`;
+    panel = `<div class="win pad center" style="background:#EBFBEE"><div class="f" style="font-size:24px;color:#2B8A3E">Locked in: ${fmtDT(q.starts_at)}</div><div class="small" style="margin:4px 0 8px">Locked in · ${ms.filter((m) => m.response === 'accept').length} going · streak ×${q.streak + 1} if it happens</div>${formedTools(q)}</div>`;
   } else {
-    panel = `<div class="win pad center" style="background:#FFE3E3"><div class="f" style="font-size:20px;color:#C92A2A">${q.status === 'cancelled' ? 'Cancelled — streak broken' : q.status === 'failed' ? 'No date found — streak broken' : 'Quest complete'}</div></div>`;
+    panel = `<div class="win pad center" style="background:#FFE3E3"><div class="f" style="font-size:20px;color:#C92A2A">${q.status === 'cancelled' ? 'Cancelled — streak broken' : q.status === 'failed' ? 'No date found — streak broken' : 'Party Quest complete'}</div></div>`;
   }
-  paint(`<div class="stack">${header('Date battleship', '#/', `<span class="chip">Round ${q.round}</span>`)}
+  paint(`<div class="stack">${header('Date Selection', '#/', `<span class="chip">Round ${q.round}</span>`)}
     <div class="win"><div class="bar">${esc(q.title)} <span style="margin-left:auto;color:#C2410C">Streak ×${q.streak}</span></div><div class="pad stack" style="gap:6px">
       <div class="small"><b>Need ${q.min_players} of ${ms.length} free</b>${q.status === 'gathering' ? ` · ${q.phase === 'pick' ? 'picks' : 'voting'} close ${fmtDT(q.deadline)}` : ''}${q.location ? ' · ' + esc(q.location) : ''}</div>
-      <div class="row" style="flex-wrap:wrap;gap:6px">${ms.map((m) => `<span class="chip ${firedIds.has(m.user_id) ? 'ok' : 'wait'}">${esc(person(m.user_id).name)} · ${firedIds.has(m.user_id) ? 'fired' : 'picking'}</span>`).join('')}</div>
+      <div class="row" style="flex-wrap:wrap;gap:6px">${ms.map((m) => `<span class="chip ${firedIds.has(m.user_id) ? 'ok' : 'wait'}">${esc(person(m.user_id).name)} · ${firedIds.has(m.user_id) ? 'picked' : 'picking'}</span>`).join('')}</div>
     </div></div>
     ${canPick ? '<div class="muted small">Tap every day you can do. Others\' picks stay hidden until the round is over.</div>' : ''}
     ${cal}
@@ -456,8 +470,8 @@ async function screenArchive() {
   const past = d.quests.filter((q) => ['done', 'failed', 'cancelled'].includes(q.status));
   const ended = d.pacts.filter((p) => p.status === 'ended');
   paint(`<div class="stack"><h1>Archive</h1>
-    <div class="win"><div class="bar">Adventures shared with you</div>${(stats || []).filter((s) => s.user_id !== me()).sort((a, b) => b.shared_quests - a.shared_quests).map((s) => `<div class="item">${avatar(person(s.user_id).hair, 28)}<b class="grow">${esc(person(s.user_id).name)}</b><span class="f">${s.shared_quests} quest${s.shared_quests === 1 ? '' : 's'}</span></div>`).join('') || '<div class="pad muted">No crewmates yet.</div>'}</div>
-    <div class="win"><div class="bar">Past quests</div>${past.length ? past.map(questRow).join('') : '<div class="pad muted">Nothing here yet.</div>'}</div>
+    <div class="win"><div class="bar">Party Quests shared with you</div>${(stats || []).filter((s) => s.user_id !== me()).sort((a, b) => b.shared_quests - a.shared_quests).map((s) => `<div class="item">${avatar(person(s.user_id).hair, 28)}<b class="grow">${esc(person(s.user_id).name)}</b><span class="f">${s.shared_quests} PQ${s.shared_quests === 1 ? '' : 's'}</span></div>`).join('') || '<div class="pad muted">No crewmates yet.</div>'}</div>
+    <div class="win"><div class="bar">Past Party Quests</div>${past.length ? past.map(questRow).join('') : '<div class="pad muted">Nothing here yet.</div>'}</div>
     <div class="win"><div class="bar">Past pacts</div>${ended.length ? ended.map((p) => `<a class="item" href="#/pact/${p.id}"><span class="grow"><b>${esc(p.name)}</b><br><span class="small muted">Ended ${fmtDay(p.due_date)}</span></span><span class="f">›</span></a>`).join('') : '<div class="pad muted">No finished pacts yet.</div>'}</div>
   </div>`, 'archive');
 }
@@ -547,7 +561,7 @@ const A = {
   nqMin(el) { nqMin = Math.max(1, Math.min(nqPicked.size + 1, nqMin + Number(el.dataset.d))); keepInputs(() => render()); },
   async nqPost(el) {
     const kind = el.dataset.k, v = (id) => document.getElementById(id)?.value;
-    const title = v('nq-title')?.trim(); if (!title) return toast('Name the quest');
+    const title = v('nq-title')?.trim(); if (!title) return toast('Name the Party Quest');
     if (!v('nq-dl')) return toast('Set the answer-by time');
     el.disabled = true;
     try {
@@ -557,7 +571,7 @@ const A = {
         p_repeat_months: kind === 'recurring' ? Number(v('nq-rep')) : null, p_time: kind === 'recurring' ? v('nq-time') : null,
         p_min: nqMin, p_deadline: new Date(v('nq-dl')).toISOString(), p_members: [...nqPicked],
       });
-      nqPicked = null; toast('Quest posted!'); location.hash = '#/quest/' + id;
+      nqPicked = null; toast('Party Quest posted!'); location.hash = '#/quest/' + id;
     } catch { el.disabled = false; }
   },
   async respond(el) {
@@ -570,14 +584,22 @@ const A = {
       toast({ accept: 'You\'re in!', decline: 'Maybe next quest', propose: 'Counter-offer sent' }[r]); await refresh();
     } catch { el.disabled = false; }
   },
-  async cancelQuest(el) { if (!confirm('Cancel this quest for everyone?')) return; await rpc('cancel_quest', { p_quest: el.dataset.id }); toast('Quest cancelled'); await refresh(); },
+  async reschedule(el) {
+    const iso = el.dataset.t || (document.getElementById('rs-time').value ? new Date(document.getElementById('rs-time').value).toISOString() : null);
+    if (!iso) return toast('Pick a time');
+    if (!confirm(`Move to ${fmtDT(iso)} and re-send invites to the party?`)) return;
+    el.disabled = true;
+    try { await rpc('reschedule_quest', { p_quest: el.dataset.id, p_starts_at: iso, p_from_user: el.dataset.from || null }); toast('New time sent to the party'); await refresh(); }
+    catch { el.disabled = false; }
+  },
+  async cancelQuest(el) { if (!confirm('Cancel this Party Quest for everyone?')) return; await rpc('cancel_quest', { p_quest: el.dataset.id }); toast('Party Quest cancelled'); await refresh(); },
   pick(el) { const s = S.picks[el.dataset.id].set, d = el.dataset.d; s.has(d) ? s.delete(d) : s.add(d); el.classList.toggle('mine', s.has(d)); el.setAttribute('aria-pressed', s.has(d)); const f = document.querySelector('[data-act="fire"]'); if (f) f.textContent = f.textContent.replace(/\(\d+ picked\)/, `(${s.size} picked)`); },
   async fire(el) {
-    const set = S.picks[el.dataset.id].set; if (!set.size && !confirm('Fire with no days picked? That means you can\'t make any.')) return;
+    const set = S.picks[el.dataset.id].set; if (!set.size && !confirm('Submit with no days picked? That means you can\'t make any.')) return;
     el.disabled = true;
     try {
       const r = await rpc('submit_picks', { p_quest: el.dataset.id, p_dates: [...set].sort() });
-      toast({ waiting: 'Fired! Waiting for the others…', miss: 'Miss! No date works yet — round 2', hit: 'Hit! Date locked in', vote: 'Multiple hits! Time to vote' }[r] || 'Fired!');
+      toast({ waiting: 'Picks in! Waiting for the others…', miss: 'No match yet — next round', hit: 'Date locked in!', vote: 'A few dates work — time to vote' }[r] || 'Picks in!');
       await refresh();
     } catch { el.disabled = false; }
   },

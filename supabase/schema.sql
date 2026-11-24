@@ -323,7 +323,7 @@ begin
       coalesce(p_time, '18:00'), p_min, p_deadline, 'pick', v_start,
       (v_start + make_interval(months => coalesce(p_repeat_months, 1)) - interval '1 day')::date);
   else
-    raise exception 'Unknown quest type';
+    raise exception 'Unknown Party Quest type';
   end if;
   insert into quest_members (quest_id, user_id, response, responded_at)
   select v_id, m, case when m = auth.uid() and p_kind = 'once' then 'accept' else 'pending' end,
@@ -355,8 +355,8 @@ returns void language plpgsql security definer set search_path = public as $$
 declare r quests; v_yes int;
 begin
   select * into r from quests where id = p_quest;
-  if r.id is null or not is_member(r.crew_id) then raise exception 'Quest not found'; end if;
-  if r.kind <> 'once' or r.status <> 'gathering' then raise exception 'This quest is no longer taking answers'; end if;
+  if r.id is null or not is_member(r.crew_id) then raise exception 'Party Quest not found'; end if;
+  if r.kind <> 'once' or r.status <> 'gathering' then raise exception 'This Party Quest is no longer taking answers'; end if;
   if p_response not in ('accept','decline','propose') then raise exception 'Bad answer'; end if;
   update quest_members set response = p_response, comment = nullif(trim(p_comment), ''),
     proposed_at = case when p_response = 'propose' then p_proposed_at end, responded_at = now()
@@ -386,7 +386,7 @@ begin
       select 1 from date_votes v where v.quest_id = q and v.user_id = m.user_id and v.vote = d)
     then 'accept' else 'pending' end, responded_at = now()
   where quest_id = q;
-  perform notify(quest_uids(q), 'Hit! ' || r.title || ' is on ' || fmt_date(d),
+  perform notify(quest_uids(q), 'Locked in: ' || r.title || ' is on ' || fmt_date(d),
     'Locked in. Add it to your calendar.', '#/quest/' || q);
 end $$;
 
@@ -426,7 +426,7 @@ begin
     perform lock_quest(q, v_hits[1]); return 'hit';
   elsif coalesce(array_length(v_hits, 1), 0) > 1 then
     update quests set phase = 'vote', shortlist = v_hits where id = q;
-    perform notify(quest_uids(q), 'Multiple hits! Vote for ' || r.title,
+    perform notify(quest_uids(q), 'A few dates work: vote for ' || r.title,
       array_length(v_hits, 1) || ' dates work. Vote for one.', '#/quest/' || q);
     return 'vote';
   elsif p_final then
@@ -437,7 +437,7 @@ begin
     return 'failed';
   else
     update quests set round = round + 1 where id = q;
-    perform notify(quest_uids(q), 'Miss! ' || r.title || ' — round ' || (r.round + 1),
+    perform notify(quest_uids(q), 'No match yet: ' || r.title || ' — round ' || (r.round + 1),
       'No date works yet. See who is free on each day and pick again.', '#/quest/' || q);
     return 'miss';
   end if;
@@ -448,7 +448,7 @@ language plpgsql security definer set search_path = public as $$
 declare r quests; v_need int; v_have int;
 begin
   select * into r from quests where id = p_quest;
-  if r.id is null or not is_member(r.crew_id) then raise exception 'Quest not found'; end if;
+  if r.id is null or not is_member(r.crew_id) then raise exception 'Party Quest not found'; end if;
   if r.kind <> 'recurring' or r.status <> 'gathering' or r.phase <> 'pick' then raise exception 'Picking is closed'; end if;
   if not exists (select 1 from quest_members where quest_id = p_quest and user_id = auth.uid()) then raise exception 'You are not in this party'; end if;
   if exists (select 1 from unnest(p_dates) d where d < r.period_start or d > r.period_end) then raise exception 'Pick days inside the period'; end if;
@@ -477,7 +477,7 @@ language plpgsql security definer set search_path = public as $$
 declare r quests;
 begin
   select * into r from quests where id = p_quest;
-  if r.id is null or not is_member(r.crew_id) then raise exception 'Quest not found'; end if;
+  if r.id is null or not is_member(r.crew_id) then raise exception 'Party Quest not found'; end if;
   if r.status <> 'gathering' or r.phase <> 'vote' or not (p_date = any(r.shortlist)) then raise exception 'Voting is closed'; end if;
   insert into date_votes (quest_id, user_id, vote) values (p_quest, auth.uid(), p_date)
   on conflict (quest_id, user_id) do update set vote = excluded.vote;
@@ -504,7 +504,7 @@ language plpgsql security definer set search_path = public as $$
 declare r quests;
 begin
   select * into r from quests where id = p_quest;
-  if r.id is null or not is_member(r.crew_id) then raise exception 'Quest not found'; end if;
+  if r.id is null or not is_member(r.crew_id) then raise exception 'Party Quest not found'; end if;
   if split_part(p_path, '/', 1) <> auth.uid()::text then raise exception 'Bad photo path'; end if;
   insert into quest_photos (quest_id, user_id, path) values (p_quest, auth.uid(), p_path);
 end $$;
@@ -646,6 +646,30 @@ language sql stable security definer set search_path = public as $$
   where q.id = p_quest and p.round = q.round and public.is_member(q.crew_id)
 $$;
 
+-- Organiser moves a one-off Party Quest to a new time (e.g. a friend's proposal) and re-sends the invites.
+create or replace function public.reschedule_quest(p_quest uuid, p_starts_at timestamptz, p_from_user uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare r quests; v_yes int;
+begin
+  select * into r from quests where id = p_quest;
+  if r.id is null or r.created_by <> auth.uid() then raise exception 'Only the organiser can change the time'; end if;
+  if r.kind <> 'once' or r.status not in ('gathering','formed') then raise exception 'This Party Quest can no longer be changed'; end if;
+  if p_starts_at <= now() then raise exception 'Pick a time in the future'; end if;
+  update quests set starts_at = p_starts_at, status = 'gathering',
+    deadline = least(greatest(deadline, now() + interval '24 hours'), p_starts_at - interval '1 hour')
+  where id = p_quest;
+  update quest_members set
+    response = case when user_id in (auth.uid(), p_from_user) then 'accept' else 'pending' end,
+    responded_at = case when user_id in (auth.uid(), p_from_user) then now() end,
+    proposed_at = null, comment = null
+  where quest_id = p_quest;
+  perform notify(array(select user_id from quest_members where quest_id = p_quest and user_id <> auth.uid()),
+    'New time for ' || r.title, to_char(p_starts_at at time zone 'Australia/Sydney', 'Dy FMDD Mon, FMHH12:MI am') || ' — please answer again.',
+    '#/quest/' || p_quest);
+  select count(*) into v_yes from quest_members where quest_id = p_quest and response = 'accept';
+  if v_yes >= r.min_players then perform form_quest(p_quest); end if;
+end $$;
+
 -- ───────────────────────── Clock (runs every 10 minutes) ─────────────────────────
 create or replace function public.tick() returns void
 language plpgsql security definer set search_path = public as $$
@@ -717,7 +741,8 @@ grant execute on function
   public.create_pact(uuid, text, date, text, text, uuid[]), public.sign_pact(uuid, text),
   public.pact_view(uuid), public.add_checkin(uuid, text, text, text), public.judge_now(uuid),
   public.set_result(uuid, text), public.settle_debt(uuid), public.crew_stats(uuid),
-  public.is_member(uuid), public.sydney_today(), public.round_status(uuid)
+  public.is_member(uuid), public.sydney_today(), public.round_status(uuid),
+  public.reschedule_quest(uuid, timestamptz, uuid)
 to authenticated;
 revoke execute on function public.tick(), public.weekly_reminders(), public.evaluate_round(uuid, boolean),
   public.lock_quest(uuid, date), public.spawn_next(uuid, int), public.finalize_vote(uuid), public.form_quest(uuid),

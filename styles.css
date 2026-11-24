@@ -39,7 +39,7 @@ textarea.inp{resize:vertical}
 .prog{height:14px;background:#fff;border:2px solid var(--ink);border-radius:999px;overflow:hidden}
 .prog>div{height:100%;background:#F59F00;transition:width .8s ease-out}
 .tabs{position:fixed;left:0;right:0;bottom:0;background:var(--paper);border-top:3px solid var(--frame);display:flex;justify-content:center;padding-bottom:env(safe-area-inset-bottom);z-index:5}
-.tabs a{flex:1;max-width:120px;display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 0;font:600 12px Fredoka,sans-serif;text-decoration:none;color:var(--ink);position:relative}
+.tabs a{flex:1;max-width:120px;display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 0;font:600 11px Fredoka,sans-serif;white-space:nowrap;text-decoration:none;color:var(--ink);position:relative}
 .tabs a.on{background:#FFE7A8}
 .dot{position:absolute;top:4px;right:calc(50% - 20px);background:var(--blood);color:#fff;border-radius:999px;font-size:10px;padding:0 5px;border:2px solid var(--paper)}
 .fab{position:fixed;right:max(16px,calc(50% - 224px));bottom:calc(env(safe-area-inset-bottom) + 84px);width:58px;height:58px;border-radius:50%;background:var(--sun);border:3px solid var(--ink);box-shadow:0 3px 0 var(--ink);font:700 34px/50px Fredoka,sans-serif;text-align:center;text-decoration:none;color:var(--ink);z-index:4}
