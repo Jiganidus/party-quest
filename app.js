@@ -359,7 +359,7 @@ async function screenBattleship(q) {
   }
   paint(`<div class="stack">${header('Date battleship', '#/', `<span class="chip">Round ${q.round}</span>`)}
     <div class="win"><div class="bar">${esc(q.title)} <span style="margin-left:auto;color:#C2410C">Streak ×${q.streak}</span></div><div class="pad stack" style="gap:6px">
-      <div class="small"><b>Need ${q.min_players} of ${ms.length} free</b> · ${q.phase === 'pick' ? 'picks' : 'voting'} close ${fmtDT(q.deadline)}${q.location ? ' · ' + esc(q.location) : ''}</div>
+      <div class="small"><b>Need ${q.min_players} of ${ms.length} free</b>${q.status === 'gathering' ? ` · ${q.phase === 'pick' ? 'picks' : 'voting'} close ${fmtDT(q.deadline)}` : ''}${q.location ? ' · ' + esc(q.location) : ''}</div>
       <div class="row" style="flex-wrap:wrap;gap:6px">${ms.map((m) => `<span class="chip ${firedIds.has(m.user_id) ? 'ok' : 'wait'}">${esc(person(m.user_id).name)} · ${firedIds.has(m.user_id) ? 'fired' : 'picking'}</span>`).join('')}</div>
     </div></div>
     ${canPick ? '<div class="muted small">Tap every day you can do. Others\' picks stay hidden until the round is over.</div>' : ''}
