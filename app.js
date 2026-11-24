@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.4';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
+import { avatarSvg, faceSvg, parseAvatar, avatarToString, GENDERS, STYLES, HAIR_COLOURS, FACES } from './avatar.js';
 
 const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false } });
 const app = document.getElementById('app');
@@ -29,8 +30,12 @@ async function rpc(fn, args) {
   if (error) { toast(error.message.replace(/^.*?: /, '')); throw error; }
   return data;
 }
-function avatar(hair, size = 36) {
-  return `<svg width="${size}" height="${size}" viewBox="0 0 36 36" aria-hidden="true" style="flex:none"><circle cx="18" cy="20" r="13" fill="#FFE0BD" stroke="#5a3b1e" stroke-width="2"/><path d="M5 18Q8 4 18 5Q29 4 31 18Q24 11 18 12Q11 11 5 18Z" fill="${esc(hair)}" stroke="#5a3b1e" stroke-width="2"/><circle cx="13" cy="21" r="2" fill="#3b2412"/><circle cx="23" cy="21" r="2" fill="#3b2412"/><path d="M14 27Q18 30 22 27" stroke="#3b2412" stroke-width="1.5" fill="none"/></svg>`;
+function avatar(hair, size = 36) { return avatarSvg(hair, size); }
+// An avatar you can tap to send a reaction (not your own).
+function avatarFor(uid, size = 30) {
+  const p = person(uid);
+  const inner = `<span class="av" data-uid="${uid}" data-size="${size}">${avatarSvg(p.hair, size)}</span>`;
+  return uid === me() ? inner : `<button type="button" class="av-btn" data-act="reactPick" data-uid="${uid}" aria-label="React to ${esc(p.name)}">${inner}</button>`;
 }
 const ICON = {
   home: '<path d="M4 11 12 4l8 7v9h-5v-6H9v6H4z"/>', quest: '<path d="M6 21V4h11l-2 4 2 4H6"/>',
@@ -142,14 +147,16 @@ function screenInstall() {
   </div>`, null);
 }
 
-let obHair = HAIR[0], obMode = 'join';
+let obAv = { g: 'm', h: 'side', c: '#3b2412', m: 'happy' }, obMode = 'join';
 function screenOnboard() {
   const hasProfile = !!S.profile;
   paint(`<div class="stack">
     <h1 class="center" style="font-size:30px;margin-top:10px">Party Quest</h1>
     ${hasProfile ? '' : `<div class="win"><div class="bar">Create your hero</div><div class="pad stack">
-      <div class="row">${avatar(obHair, 64)}<div class="grow"><label class="l" for="ob-name">Hero name</label><input id="ob-name" class="inp" maxlength="30" placeholder="What your friends call you" autocomplete="nickname"></div></div>
-      <div><span class="l">Hair colour</span><div class="swatches">${HAIR.map((h) => `<button type="button" data-act="hair" data-h="${h}" class="${h === obHair ? 'on' : ''}" style="background:${h}" aria-label="Hair colour ${h}"></button>`).join('')}</div></div>
+      <div class="row">${avatar(obAv, 64)}<div class="grow"><label class="l" for="ob-name">Hero name</label><input id="ob-name" class="inp" maxlength="30" placeholder="What your friends call you" autocomplete="nickname"></div></div>
+      <div class="seg">${Object.entries(GENDERS).map(([g, l]) => `<button type="button" data-act="obGender" data-g="${g}" class="${obAv.g === g ? 'on' : ''}">${l}</button>`).join('')}</div>
+      <div><span class="l">Hair colour</span><div class="swatches">${HAIR_COLOURS.map((h) => `<button type="button" data-act="hair" data-h="${h}" class="${h === obAv.c ? 'on' : ''}" style="background:${h}" aria-label="Hair colour ${h}"></button>`).join('')}</div></div>
+      <div class="small muted">You can change hairstyle, face and more later.</div>
     </div></div>`}
     <div class="win"><div class="bar">Your crew</div><div class="pad stack">
       <div class="seg"><button data-act="obMode" data-m="join" class="${obMode === 'join' ? 'on' : ''}">Join a crew</button><button data-act="obMode" data-m="new" class="${obMode === 'new' ? 'on' : ''}">Start a crew</button></div>
@@ -173,7 +180,7 @@ function screenHome() {
   const best = Math.max(0, ...Object.values(series).map((q) => q.streak));
   paint(`<div class="stack">
     <div class="win row pad">
-      ${avatar(S.profile.hair, 52)}
+      <a href="#/hero" aria-label="Customise your hero" style="text-decoration:none"><span class="av" data-uid="${me()}" data-size="52">${avatar(S.profile.hair, 52)}</span></a>
       <div class="grow"><div class="f" style="font-size:20px">${esc(S.profile.name)}</div><a class="muted" href="#/crew" style="text-decoration:none">${esc(S.crew.name)} · ${S.members.length} adventurers ›</a></div>
       <div class="center f"><div style="font-size:22px;color:#C2410C">×${best}</div><div class="small">best streak</div></div>
     </div>
@@ -253,7 +260,7 @@ async function screenQuest(id) {
 
 function partyList(q, statusFn) {
   return qMembers(q.id).map((m) => { const p = person(m.user_id); const [label, cls] = statusFn(m);
-    return `<div class="row" style="padding:3px 0">${avatar(p.hair, 28)}<b class="grow">${esc(p.name)}${m.user_id === q.created_by ? ' <span class="muted">(organiser)</span>' : ''}${m.user_id === me() ? ' <span class="muted">(you)</span>' : ''}</b><span class="chip ${cls}">${label}</span></div>${m.comment ? `<div class="small muted" style="margin:-2px 0 4px 38px">“${esc(m.comment)}”${m.proposed_at ? ` · suggests ${fmtDT(m.proposed_at)}` : ''}</div>` : m.proposed_at ? `<div class="small muted" style="margin:-2px 0 4px 38px">Suggests ${fmtDT(m.proposed_at)}</div>` : ''}`; }).join('');
+    return `<div class="row" style="padding:3px 0">${avatarFor(m.user_id, 30)}<b class="grow">${esc(p.name)}${m.user_id === q.created_by ? ' <span class="muted">(organiser)</span>' : ''}${m.user_id === me() ? ' <span class="muted">(you)</span>' : ''}</b><span class="chip ${cls}">${label}</span></div>${m.comment ? `<div class="small muted" style="margin:-2px 0 4px 38px">“${esc(m.comment)}”${m.proposed_at ? ` · suggests ${fmtDT(m.proposed_at)}` : ''}</div>` : m.proposed_at ? `<div class="small muted" style="margin:-2px 0 4px 38px">Suggests ${fmtDT(m.proposed_at)}</div>` : ''}`; }).join('');
 }
 
 function formedTools(q) {
@@ -437,7 +444,7 @@ async function screenPact(id) {
     body = `<div class="row" style="padding:4px 6px"><div class="seal ${firstSeal ? 'stamp' : ''}">${icon('pact', 40, '#FFE3E3')}</div><div style="color:var(--paper)"><div class="f" style="font-size:24px">${p.status === 'sealed' ? 'Pact sealed!' : p.status === 'judging' ? 'Judgement day' : 'Pact ended'}</div><div>${esc(p.name)} · due ${fmtDay(p.due_date)}</div></div></div>
       <div class="win parch"><div class="bar red">The terms</div>${terms}<div class="pad stack" style="padding-top:0">
         ${(view || []).map((v) => { const pct = Math.min(100, Math.round((v.checkins / weeks) * 100)); const res = { hit: ['Honoured', 'ok'], miss: ['Missed', 'bad'], pending: [p.status === 'sealed' ? '' : 'Undecided', 'wait'] }[v.result];
-          return `<div><div class="row">${avatar(v.hair, 26)}<b class="grow">${esc(v.name)}</b>${res[0] ? `<span class="chip ${res[1]}">${res[0]}</span>` : `<span class="f small">EXP ${pct}%</span>`}</div><div class="small" style="margin:2px 0 4px">${esc(v.goal || '')}</div><div class="prog"><div style="width:${pct}%"></div></div><div class="small muted">${v.checkins} check-in${v.checkins === 1 ? '' : 's'}</div></div>`; }).join('')}
+          return `<div><div class="row">${avatarFor(v.user_id, 30)}<b class="grow">${esc(v.name)}</b>${res[0] ? `<span class="chip ${res[1]}">${res[0]}</span>` : `<span class="f small">EXP ${pct}%</span>`}</div><div class="small" style="margin:2px 0 4px">${esc(v.goal || '')}</div><div class="prog"><div style="width:${pct}%"></div></div><div class="small muted">${v.checkins} check-in${v.checkins === 1 ? '' : 's'}</div></div>`; }).join('')}
       </div></div>
       ${p.status === 'sealed' && mine ? `<a class="btn sun block" href="#/checkin/${id}">Weekly check-in</a>` : ''}
       ${p.status === 'judging' && mine?.result === 'pending' ? `<div class="win pad stack"><div class="f" style="font-size:18px">Did you honour the pact?</div><div class="small">Honour system. A miss adds a strike — 3 strikes = ${esc(p.penalty.replace(/^3 strikes = /, ''))}.</div><div class="row"><button class="btn go grow" data-act="result" data-r="hit" data-id="${id}">I did it</button><button class="btn no grow" data-act="result" data-r="miss" data-id="${id}">I missed</button></div></div>` : ''}
@@ -483,18 +490,41 @@ function screenCrew() {
       <div class="code">${esc(S.crew.code)}</div>
       <div class="row"><button class="btn go grow" data-act="inviteWa">Invite on WhatsApp</button><button class="btn grow" data-act="copyLink" data-link="${esc(link)}">Copy link</button></div>
     </div></div>
-    <div class="win"><div class="bar">Adventurers (${S.members.length})</div>${S.members.map((p) => `<div class="item">${avatar(p.hair, 32)}<b class="grow">${esc(p.name)}${p.id === me() ? ' (you)' : ''}</b></div>`).join('')}</div>
+    <div class="win"><div class="bar">Adventurers (${S.members.length})</div>${S.members.map((p) => `<div class="item">${avatarFor(p.id, 34)}<b class="grow">${esc(p.name)}${p.id === me() ? ' (you)' : ''}</b></div>`).join('')}</div>
     ${S.crews.length > 1 ? `<div class="win"><div class="bar">Switch crew</div>${S.crews.map((c) => `<button class="item" data-act="switchCrew" data-id="${c.id}"><b class="grow">${esc(c.name)}</b>${c.id === S.crew.id ? '<span class="chip ok">Current</span>' : '<span class="f">›</span>'}</button>`).join('')}</div>` : ''}
     <div class="win"><div class="bar">Join or start another crew</div><div class="pad stack">
       <div class="row"><input id="cr-code" class="inp grow" maxlength="6" placeholder="Crew code" style="text-transform:uppercase"><button class="btn sm sun" data-act="joinCrew">Join</button></div>
       <div class="row"><input id="cr-name" class="inp grow" maxlength="40" placeholder="New crew name"><button class="btn sm" data-act="newCrew">Start</button></div>
     </div></div>
-    <div class="win"><div class="bar">Your hero</div><div class="pad stack">
-      <div class="row">${avatar(S.profile.hair, 48)}<input id="hero-name" class="inp grow" maxlength="30" value="${esc(S.profile.name)}"></div>
-      <div class="swatches">${HAIR.map((h) => `<button type="button" data-act="heroHair" data-h="${h}" class="${h === S.profile.hair ? 'on' : ''}" style="background:${h}" aria-label="Hair colour ${h}"></button>`).join('')}</div>
-      <button class="btn sm sun" data-act="saveHero" style="align-self:flex-start">Save</button>
-    </div></div>
+    <a class="win item pad" href="#/hero" style="border:3px solid var(--frame)">${avatar(S.profile.hair, 48)}<span class="grow"><b class="f" style="font-size:18px">Customise your hero</b><br><span class="muted">Name, gender, hairstyle, colour and mood</span></span><span class="f">›</span></a>
   </div>`, 'home');
+}
+
+let heroDraft = null;
+function screenHero() {
+  if (!heroDraft) heroDraft = parseAvatar(S.profile.hair);
+  const d = heroDraft, opt = (k, v, on, inner, label) => `<button type="button" class="pick ${on ? 'on' : ''}" data-act="heroSet" data-k="${k}" data-v="${v}" aria-label="${esc(label)}" aria-pressed="${on}">${inner}</button>`;
+  paint(`<div class="stack">${header('Customise your hero', '#/')}
+    <div class="win pad center" style="background:#BFE3F7">${avatar(d, 120)}</div>
+    <div class="win"><div class="bar">Name</div><div class="pad"><input id="hero-name" class="inp" maxlength="30" value="${esc(S.profile.name)}" aria-label="Hero name"></div></div>
+    <div class="win"><div class="bar">Gender</div><div class="pad seg">${Object.entries(GENDERS).map(([g, l]) => `<button type="button" data-act="heroSet" data-k="g" data-v="${g}" class="${d.g === g ? 'on' : ''}">${l}</button>`).join('')}</div></div>
+    <div class="win"><div class="bar">Hairstyle</div><div class="pad picks">${STYLES[d.g].map(([h, l]) => opt('h', h, d.h === h, avatar({ ...d, h }, 52) + `<span>${l}</span>`, l)).join('')}</div></div>
+    <div class="win"><div class="bar">Hair colour</div><div class="pad swatches">${HAIR_COLOURS.map((c) => `<button type="button" data-act="heroSet" data-k="c" data-v="${c}" class="${d.c === c ? 'on' : ''}" style="background:${c}" aria-label="Hair colour ${c}"></button>`).join('')}</div></div>
+    <div class="win"><div class="bar">Mood <span class="small" style="margin-left:auto">your everyday face</span></div><div class="pad picks">${FACES.map(([m, l]) => opt('m', m, d.m === m, faceSvg(m, 40, d.g) + `<span>${l}</span>`, l)).join('')}</div></div>
+    <button class="btn go block" data-act="saveHero" style="font-size:20px">Save hero</button>
+  </div>`, 'home');
+}
+
+// Live reactions: the target's avatar briefly shows the chosen face, everywhere it appears on screen.
+function showReaction({ from, to, m }) {
+  const label = (FACES.find(([k]) => k === m) || [, 'a face'])[1].toLowerCase();
+  document.querySelectorAll(`.av[data-uid="${to}"]`).forEach((span) => {
+    span.innerHTML = avatarSvg(person(to).hair, Number(span.dataset.size) || 30, m);
+    span.classList.remove('react-pop'); void span.offsetWidth; span.classList.add('react-pop');
+    clearTimeout(span._t); span._t = setTimeout(() => { span.innerHTML = avatarSvg(person(to).hair, Number(span.dataset.size) || 30); span.classList.remove('react-pop'); }, 4000);
+  });
+  if (to === me() && from !== me()) toast(`${person(from).name} sent you a ${label} face`);
+  else if (from === me()) toast(`Sent ${person(to).name} a ${label} face`);
 }
 
 async function screenAlerts() {
@@ -539,7 +569,8 @@ async function enablePush() {
 const A = {
   async copyCode(el) { await navigator.clipboard?.writeText(el.dataset.code); toast('Code copied'); },
   skipInstall() { localStorage.setItem('pq.skipInstall', '1'); boot(); },
-  hair(el) { obHair = el.dataset.h; const n = document.getElementById('ob-name')?.value; screenOnboard(); if (n) document.getElementById('ob-name').value = n; },
+  hair(el) { obAv.c = el.dataset.h; const n = document.getElementById('ob-name')?.value; screenOnboard(); if (n) document.getElementById('ob-name').value = n; },
+  obGender(el) { obAv.g = el.dataset.g; obAv.h = STYLES[obAv.g][0][0]; const n = document.getElementById('ob-name')?.value; screenOnboard(); if (n) document.getElementById('ob-name').value = n; },
   obMode(el) { const n = document.getElementById('ob-name')?.value; obMode = el.dataset.m; screenOnboard(); if (n) document.getElementById('ob-name').value = n; },
   async obGo(el) {
     const name = document.getElementById('ob-name')?.value.trim();
@@ -551,7 +582,7 @@ const A = {
     el.disabled = true;
     try {
       if (!S.user) { const { data, error } = await sb.auth.signInAnonymously(); if (error) throw error; S.user = data.user; }
-      if (!S.profile) await rpc('save_profile', { p_name: name, p_hair: obHair });
+      if (!S.profile) await rpc('save_profile', { p_name: name, p_hair: avatarToString(obAv) });
       const c = obMode === 'join' ? await rpc('join_crew', { p_code: code }) : await rpc('create_crew', { p_name: crewName });
       localStorage.setItem('pq.crew', c.id); localStorage.removeItem('pq.pending'); S.pending = null;
       location.hash = obMode === 'new' ? '#/crew' : '#/'; await boot();
@@ -641,8 +672,25 @@ const A = {
   async switchCrew(el) { localStorage.setItem('pq.crew', el.dataset.id); S.crew = S.crews.find((c) => c.id === el.dataset.id); await loadCrew(); goLive(); location.hash = '#/'; render(); },
   async joinCrew() { const c = await rpc('join_crew', { p_code: document.getElementById('cr-code').value }); localStorage.setItem('pq.crew', c.id); await boot(); toast('Joined ' + c.name); },
   async newCrew() { const n = document.getElementById('cr-name').value.trim(); if (!n) return toast('Name the crew'); const c = await rpc('create_crew', { p_name: n }); localStorage.setItem('pq.crew', c.id); await boot(); },
-  heroHair(el) { document.querySelectorAll('[data-act="heroHair"]').forEach((b) => b.classList.toggle('on', b === el)); el.closest('.win').dataset.hair = el.dataset.h; },
-  async saveHero(el) { const hair = el.closest('.win').dataset.hair || S.profile.hair; const name = document.getElementById('hero-name').value.trim(); if (!name) return toast('Name required'); await rpc('save_profile', { p_name: name, p_hair: hair }); S.profile = { ...S.profile, name, hair }; S.people[me()] = S.profile; toast('Hero saved'); render(); },
+  heroSet(el) { const k = el.dataset.k, v = el.dataset.v; heroDraft[k] = v; if (k === 'g') heroDraft.h = STYLES[v][0][0]; keepInputs(() => screenHero()); },
+  async saveHero(el) {
+    const name = document.getElementById('hero-name').value.trim(); if (!name) return toast('Name required');
+    const hair = avatarToString(heroDraft);
+    await rpc('save_profile', { p_name: name, p_hair: hair });
+    S.profile = { ...S.profile, name, hair }; S.people[me()] = S.profile; heroDraft = null; toast('Hero saved'); location.hash = '#/';
+  },
+  reactPick(el) {
+    const uid = el.dataset.uid; document.querySelector('.react-sheet')?.remove();
+    const sheet = document.createElement('div'); sheet.className = 'react-sheet';
+    sheet.innerHTML = `<div class="f small" style="margin-bottom:6px">React to ${esc(person(uid).name)}</div><div class="row" style="justify-content:space-between">${FACES.map(([m, l]) => `<button type="button" data-act="react" data-uid="${uid}" data-m="${m}" aria-label="${l}">${faceSvg(m, 36, parseAvatar(person(uid).hair).g)}</button>`).join('')}</div>`;
+    document.body.appendChild(sheet);
+    setTimeout(() => document.addEventListener('click', function close(e) { if (!e.target.closest('.react-sheet')) { sheet.remove(); document.removeEventListener('click', close); } }), 0);
+  },
+  react(el) {
+    const to = el.dataset.uid, m = el.dataset.m; document.querySelector('.react-sheet')?.remove();
+    showReaction({ from: me(), to, m });
+    liveChannel?.send({ type: 'broadcast', event: 'react', payload: { from: me(), to, m } });
+  },
   enablePush: () => enablePush().catch((e) => toast(e.message)),
   async readAll() { await sb.from('notifications').update({ read: true }).eq('read', false); await refresh(); },
   async openNote(el) { await sb.from('notifications').update({ read: true }).eq('id', el.dataset.id); S.d.unread = Math.max(0, S.d.unread - 1); location.hash = el.dataset.url; },
@@ -674,13 +722,14 @@ async function render() {
       case 'checkin': return screenCheckin(parts[1]);
       case 'archive': return await screenArchive();
       case 'crew': return screenCrew();
+      case 'hero': return screenHero();
       case 'alerts': return await screenAlerts();
       default: return screenHome();
     }
   } catch (e) { console.error(e); paint(`<div class="win pad">Something went wrong: ${esc(e.message)}</div>`, 'home'); }
 }
 async function refresh() { await loadCrew(); await render(); }
-const isEditing = () => { const a = document.activeElement; return (a && /INPUT|TEXTAREA|SELECT/.test(a.tagName) && a.type !== 'file') || /^#\/(new-quest|new-pact|checkin)/.test(location.hash); };
+const isEditing = () => { const a = document.activeElement; return (a && /INPUT|TEXTAREA|SELECT/.test(a.tagName) && a.type !== 'file') || /^#\/(new-quest|new-pact|checkin|hero)/.test(location.hash); };
 // Show the screen straight away from what's already loaded, then quietly refresh in the background.
 async function backgroundRefresh() {
   const before = JSON.stringify(S.d);
@@ -691,7 +740,7 @@ async function backgroundRefresh() {
 }
 const currentTab = () => ({ '': 'home', quests: 'quests', 'new-quest': 'quests', quest: 'quests', pacts: 'pacts', 'new-pact': 'pacts', pact: 'pacts', checkin: 'pacts', archive: 'archive', alerts: 'alerts' }[location.hash.replace(/^#\/?/, '').split(/[/?]/)[0]] || 'home');
 window.addEventListener('hashchange', async () => {
-  if (!location.hash.startsWith('#/new-quest')) nqPicked = null; if (!location.hash.startsWith('#/new-pact')) npPicked = null;
+  if (!location.hash.startsWith('#/new-quest')) nqPicked = null; if (!location.hash.startsWith('#/new-pact')) npPicked = null; if (!location.hash.startsWith('#/hero')) heroDraft = null;
   if (!S.d) return refresh();
   await render(); backgroundRefresh();
 });
@@ -710,6 +759,7 @@ async function goLive() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'quest_members' }, ping)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'crew_members', filter: `crew_id=eq.${cid}` }, ping)
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${me()}` }, ping)
+    .on('broadcast', { event: 'react' }, ({ payload }) => payload && showReaction(payload))
     .subscribe();
 }
 
