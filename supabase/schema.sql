@@ -771,7 +771,7 @@ select cron.schedule('pq-weekly', '0 7 * * 0', 'select public.weekly_reminders()
 
 -- ───────────────────────── Push function address ─────────────────────────
 insert into public.app_config (key, value)
-values ('push_url', 'https://luszvyaenkpvocqbskrj.supabase.co/functions/v1/send-push')
+values ('push_url', 'https://lzfzfgwmcrgowgojfonn.supabase.co/functions/v1/send-push')
 on conflict (key) do update set value = excluded.value;
 
 -- ───────────────────────── Live updates (Supabase Realtime) ─────────────────────────
