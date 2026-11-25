@@ -80,6 +80,12 @@ create table if not exists public.date_votes (
   primary key (quest_id, user_id)
 );
 
+-- Time slots (Date Selection): picks are 'YYYY-MM-DD@slot' keys, e.g. '2026-12-14@eve'.
+alter table public.date_picks add column if not exists slots text[] not null default '{}';
+alter table public.date_votes add column if not exists vote_slot text;
+alter table public.quests add column if not exists slot text;
+alter table public.quests add column if not exists shortlist_slots text[];
+
 create table if not exists public.quest_photos (
   id uuid primary key default gen_random_uuid(),
   quest_id uuid not null references public.quests on delete cascade,
@@ -376,6 +382,39 @@ begin
   if v_yes >= r.min_players then perform form_quest(p_quest); end if;
 end $$;
 
+-- ── Time slots: dawn 6–10am, morning 10am–2pm, afternoon 2–6pm, evening 6–10pm, late night 10pm+
+create or replace function public.slot_rank(s text) returns int language sql immutable as $$
+  select array_position(array['dawn','morn','arvo','eve','late'], s) $$;
+create or replace function public.slot_start(s text) returns time language sql immutable as $$
+  select case s when 'dawn' then '06:00' when 'morn' then '10:00' when 'arvo' then '14:00'
+    when 'eve' then '18:00' when 'late' then '22:00' end::time $$;
+create or replace function public.slot_label(s text) returns text language sql immutable as $$
+  select case s when 'dawn' then 'dawn (6–10am)' when 'morn' then 'morning (10am–2pm)' when 'arvo' then 'afternoon (2–6pm)'
+    when 'eve' then 'evening (6–10pm)' when 'late' then 'late night (10pm+)' end $$;
+create or replace function public.key_day(k text) returns date language sql immutable as $$ select split_part(k, '@', 1)::date $$;
+create or replace function public.key_slot(k text) returns text language sql immutable as $$ select split_part(k, '@', 2) $$;
+-- A pick saved without slots (older app version) counts as free all day.
+create or replace function public.pick_keys(p_slots text[], p_dates date[]) returns text[] language sql immutable as $$
+  select case when cardinality(p_slots) > 0 then p_slots else coalesce((
+    select array_agg(d::text || '@' || x) from unnest(p_dates) d, unnest(array['dawn','morn','arvo','eve','late']) x), '{}') end $$;
+
+create or replace function public.lock_slot(q uuid, k text) returns void
+language plpgsql security definer set search_path = public as $$
+declare r quests;
+begin
+  update quests set phase = 'locked', status = 'formed', slot = key_slot(k),
+    starts_at = ((key_day(k) + slot_start(key_slot(k)))::timestamp at time zone 'Australia/Sydney')
+  where id = q and status = 'gathering' returning * into r;
+  if r.id is null then return; end if;
+  update quest_members m set response = case when exists (
+      select 1 from date_picks p where p.quest_id = q and p.user_id = m.user_id and k = any(pick_keys(p.slots, p.dates))) or exists (
+      select 1 from date_votes v where v.quest_id = q and v.user_id = m.user_id and v.vote_slot = k)
+    then 'accept' else 'pending' end, responded_at = now()
+  where quest_id = q;
+  perform notify(quest_uids(q), 'Locked in: ' || r.title || ' is on ' || fmt_date(key_day(k)) || ', ' || slot_label(key_slot(k)),
+    'Locked in. Add it to your calendar.', '#/quest/' || q);
+end $$;
+
 create or replace function public.lock_quest(q uuid, d date) returns void
 language plpgsql security definer set search_path = public as $$
 declare r quests;
@@ -418,19 +457,21 @@ end $$;
 -- p_final = true at the deadline (a miss then fails the quest instead of starting another round).
 create or replace function public.evaluate_round(q uuid, p_final boolean) returns text
 language plpgsql security definer set search_path = public as $$
-declare r quests; v_hits date[];
+declare r quests; v_hits text[];
 begin
   select * into r from quests where id = q for update;
   if r.status <> 'gathering' or r.phase <> 'pick' then return 'skip'; end if;
-  select array_agg(d order by d) into v_hits from (
-    select d from date_picks p, unnest(p.dates) d
-    where p.quest_id = q and p.round = r.round group by d having count(*) >= r.min_players) s;
+  -- A match = the minimum number of players free on the same day AND the same time slot
+  select array_agg(k order by key_day(k), slot_rank(key_slot(k))) into v_hits from (
+    select k from date_picks p, unnest(pick_keys(p.slots, p.dates)) k
+    where p.quest_id = q and p.round = r.round group by k having count(distinct p.user_id) >= r.min_players) s;
   if coalesce(array_length(v_hits, 1), 0) = 1 then
-    perform lock_quest(q, v_hits[1]); return 'hit';
+    perform lock_slot(q, v_hits[1]); return 'hit';
   elsif coalesce(array_length(v_hits, 1), 0) > 1 then
-    update quests set phase = 'vote', shortlist = v_hits where id = q;
+    update quests set phase = 'vote', shortlist_slots = v_hits,
+      shortlist = (select array_agg(distinct key_day(k)) from unnest(v_hits) k) where id = q;
     perform notify(quest_uids(q), 'A few dates work: vote for ' || r.title,
-      array_length(v_hits, 1) || ' dates work. Vote for one.', '#/quest/' || q);
+      array_length(v_hits, 1) || ' day and time options work. Vote for one.', '#/quest/' || q);
     return 'vote';
   elsif p_final then
     update quests set status = 'failed' where id = q;
@@ -441,7 +482,7 @@ begin
   else
     update quests set round = round + 1 where id = q;
     perform notify(quest_uids(q), 'No match yet: ' || r.title || ' — round ' || (r.round + 1),
-      'No date works yet. See who is free on each day and pick again.', '#/quest/' || q);
+      'No day and time works yet. See who was free on each day and pick again.', '#/quest/' || q);
     return 'miss';
   end if;
 end $$;
@@ -456,7 +497,30 @@ begin
   if not exists (select 1 from quest_members where quest_id = p_quest and user_id = auth.uid()) then raise exception 'You are not in this party'; end if;
   if exists (select 1 from unnest(p_dates) d where d < r.period_start or d > r.period_end) then raise exception 'Pick days inside the period'; end if;
   insert into date_picks (quest_id, user_id, round, dates) values (p_quest, auth.uid(), r.round, coalesce(p_dates, '{}'))
-  on conflict (quest_id, user_id, round) do update set dates = excluded.dates, created_at = now();
+  on conflict (quest_id, user_id, round) do update set dates = excluded.dates, slots = '{}', created_at = now();
+  update quests set touched_at = now() where id = p_quest;
+  select count(*) into v_need from quest_members where quest_id = p_quest;
+  select count(*) into v_have from date_picks where quest_id = p_quest and round = r.round;
+  if v_have >= v_need then return evaluate_round(p_quest, false); end if;
+  return 'waiting';
+end $$;
+
+-- Picks with time slots: p_slots like {'2026-12-14@eve','2026-12-20@morn'}
+create or replace function public.submit_slots(p_quest uuid, p_slots text[]) returns text
+language plpgsql security definer set search_path = public as $$
+declare r quests; v_need int; v_have int; v_keys text[]; v_days date[];
+begin
+  select * into r from quests where id = p_quest;
+  if r.id is null or not is_member(r.crew_id) then raise exception 'Party Quest not found'; end if;
+  if r.kind <> 'recurring' or r.status <> 'gathering' or r.phase <> 'pick' then raise exception 'Picking is closed'; end if;
+  if not exists (select 1 from quest_members where quest_id = p_quest and user_id = auth.uid()) then raise exception 'You are not in this party'; end if;
+  if exists (select 1 from unnest(coalesce(p_slots, '{}')) k
+             where k !~ '^\d{4}-\d{2}-\d{2}@(dawn|morn|arvo|eve|late)$') then raise exception 'Bad time slot'; end if;
+  select coalesce(array_agg(distinct k), '{}'), coalesce(array_agg(distinct key_day(k)), '{}')
+    into v_keys, v_days from unnest(coalesce(p_slots, '{}')) k;
+  if exists (select 1 from unnest(v_days) d where d < r.period_start or d > r.period_end) then raise exception 'Pick days inside the period'; end if;
+  insert into date_picks (quest_id, user_id, round, dates, slots) values (p_quest, auth.uid(), r.round, v_days, v_keys)
+  on conflict (quest_id, user_id, round) do update set dates = excluded.dates, slots = excluded.slots, created_at = now();
   update quests set touched_at = now() where id = p_quest;
   select count(*) into v_need from quest_members where quest_id = p_quest;
   select count(*) into v_have from date_picks where quest_id = p_quest and round = r.round;
@@ -470,6 +534,12 @@ declare r quests; v_pick date;
 begin
   select * into r from quests where id = q;
   if r.status <> 'gathering' or r.phase <> 'vote' then return; end if;
+  if r.shortlist_slots is not null then
+    perform lock_slot(q, (select s.k from unnest(r.shortlist_slots) s(k)
+      left join date_votes v on v.quest_id = q and v.vote_slot = s.k
+      group by s.k order by count(v.user_id) desc, key_day(s.k), slot_rank(key_slot(s.k)) limit 1));
+    return;
+  end if;
   select s.d into v_pick from unnest(r.shortlist) s(d)
     left join date_votes v on v.quest_id = q and v.vote = s.d
     group by s.d order by count(v.user_id) desc, s.d asc limit 1;
@@ -483,8 +553,25 @@ begin
   select * into r from quests where id = p_quest;
   if r.id is null or not is_member(r.crew_id) then raise exception 'Party Quest not found'; end if;
   if r.status <> 'gathering' or r.phase <> 'vote' or not (p_date = any(r.shortlist)) then raise exception 'Voting is closed'; end if;
+  if r.shortlist_slots is not null then raise exception 'Please reopen the app to get the latest version'; end if;
   insert into date_votes (quest_id, user_id, vote) values (p_quest, auth.uid(), p_date)
   on conflict (quest_id, user_id) do update set vote = excluded.vote;
+  update quests set touched_at = now() where id = p_quest;
+  if (select count(*) from date_votes where quest_id = p_quest) >= (select count(*) from quest_members where quest_id = p_quest) then
+    perform finalize_vote(p_quest);
+  end if;
+end $$;
+
+create or replace function public.vote_slot(p_quest uuid, p_slot text) returns void
+language plpgsql security definer set search_path = public as $$
+declare r quests;
+begin
+  select * into r from quests where id = p_quest;
+  if r.id is null or not is_member(r.crew_id) then raise exception 'Party Quest not found'; end if;
+  if r.status <> 'gathering' or r.phase <> 'vote' or not (p_slot = any(coalesce(r.shortlist_slots, '{}'))) then raise exception 'Voting is closed'; end if;
+  if not exists (select 1 from quest_members where quest_id = p_quest and user_id = auth.uid()) then raise exception 'You are not in this party'; end if;
+  insert into date_votes (quest_id, user_id, vote, vote_slot) values (p_quest, auth.uid(), key_day(p_slot), p_slot)
+  on conflict (quest_id, user_id) do update set vote = excluded.vote, vote_slot = excluded.vote_slot;
   update quests set touched_at = now() where id = p_quest;
   if (select count(*) from date_votes where quest_id = p_quest) >= (select count(*) from quest_members where quest_id = p_quest) then
     perform finalize_vote(p_quest);
@@ -751,10 +838,12 @@ grant execute on function
   public.pact_view(uuid), public.add_checkin(uuid, text, text, text), public.judge_now(uuid),
   public.set_result(uuid, text), public.settle_debt(uuid), public.crew_stats(uuid),
   public.is_member(uuid), public.sydney_today(), public.round_status(uuid),
-  public.reschedule_quest(uuid, timestamptz, uuid)
+  public.reschedule_quest(uuid, timestamptz, uuid), public.submit_slots(uuid, text[]), public.vote_slot(uuid, text),
+  public.slot_rank(text), public.slot_start(text), public.slot_label(text), public.key_day(text), public.key_slot(text),
+  public.pick_keys(text[], date[])
 to authenticated;
 revoke execute on function public.tick(), public.weekly_reminders(), public.evaluate_round(uuid, boolean),
-  public.lock_quest(uuid, date), public.spawn_next(uuid, int), public.finalize_vote(uuid), public.form_quest(uuid),
+  public.lock_quest(uuid, date), public.lock_slot(uuid, text), public.spawn_next(uuid, int), public.finalize_vote(uuid), public.form_quest(uuid),
   public.start_judging(uuid), public.notify(uuid[], text, text, text), public.pname(uuid),
   public.quest_uids(uuid), public.pact_uids(uuid), public.push_on_notification() from authenticated;
 

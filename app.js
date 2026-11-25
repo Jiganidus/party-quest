@@ -234,7 +234,7 @@ function screenNewQuest(kind) {
       <div><label class="l" for="nq-title">What's the Party Quest?</label><input id="nq-title" class="inp" maxlength="80" placeholder="${kind === 'once' ? 'Friday dinner' : 'Monthly BBQ'}"></div>
       ${kind === 'once'
         ? `<div><label class="l" for="nq-when">When</label><input id="nq-when" type="datetime-local" class="inp" value="${localInput(ev)}"></div>`
-        : `<div class="row"><div class="grow"><label class="l" for="nq-rep">Repeats</label><select id="nq-rep" class="inp"><option value="1">Monthly</option><option value="3">Quarterly</option></select></div><div style="width:120px"><label class="l" for="nq-time">Usual time</label><input id="nq-time" type="time" class="inp" value="18:00"></div></div>`}
+        : `<div><label class="l" for="nq-rep">Repeats</label><select id="nq-rep" class="inp"><option value="1">Monthly</option><option value="3">Quarterly</option></select></div>`}
       <div><label class="l" for="nq-loc">Where</label><input id="nq-loc" class="inp" maxlength="120" placeholder="Place or address (optional)"></div>
       <div><span class="l">Party · tap to invite</span>
         ${others.length ? `<div class="row" style="flex-wrap:wrap;gap:12px">${others.map((p) => `<button type="button" data-act="nqToggle" data-id="${p.id}" aria-pressed="${nqPicked.has(p.id)}" style="background:none;border:0;padding:0;cursor:pointer;display:flex;flex-direction:column;align-items:center;font:800 12px Nunito;color:var(--ink);opacity:${nqPicked.has(p.id) ? 1 : 0.45}"><span style="border:3px solid ${nqPicked.has(p.id) ? '#2F9E44' : 'transparent'};border-radius:50%;display:block">${avatar(p.hair, 44)}</span>${esc(p.name)}</button>`).join('')}</div>`
@@ -245,7 +245,7 @@ function screenNewQuest(kind) {
         <button class="btn sm" data-act="nqMin" data-d="-1" aria-label="Fewer">−</button><div class="f" style="font-size:24px;width:28px;text-align:center">${nqMin}</div><button class="btn sm" data-act="nqMin" data-d="1" aria-label="More">+</button>
       </div>
       <div><label class="l" for="nq-dl">${kind === 'once' ? 'Answer by' : 'Date picks close'}</label><input id="nq-dl" type="datetime-local" class="inp" value="${localInput(dl)}"></div>
-      ${kind === 'recurring' ? '<div class="muted small">Everyone marks the days they can do in the next period. The app finds the date that works.</div>' : ''}
+      ${kind === 'recurring' ? '<div class="muted small">Everyone marks the days and times they can do in the next period. The app finds the day and time that works.</div>' : ''}
     </div></div>
     <button class="btn go block" data-act="nqPost" data-k="${kind}" style="font-size:20px">Post Party Quest!</button>
   </div>`, 'quests');
@@ -327,68 +327,105 @@ async function screenOnce(q) {
   </div>`, 'quests');
 }
 
+const SLOTS = [['dawn', 'Dawn', '6–10am'], ['morn', 'Morning', '10am–2pm'], ['arvo', 'Afternoon', '2–6pm'], ['eve', 'Evening', '6–10pm'], ['late', 'Late night', '10pm+']];
+const SLOT_NAME = Object.fromEntries(SLOTS.map(([k, n]) => [k, n]));
+const SLOT_TIME = Object.fromEntries(SLOTS.map(([k, , t]) => [k, t]));
+// A saved pick → list of 'YYYY-MM-DD@slot' keys (older picks without slots count as all day)
+const pickKeys = (p) => (p.slots && p.slots.length ? p.slots : (p.dates || []).flatMap((d) => SLOTS.map(([k]) => `${d}@${k}`)));
+const slotLine = (key) => { const [d, k] = key.split('@'); return `${fmtDay(d)} · ${SLOT_NAME[k]} <span class="small">${SLOT_TIME[k]}</span>`; };
+
 async function screenBattleship(q) {
   const [{ data: picks }, { data: fired }, { data: votes }] = await Promise.all([
     sb.from('date_picks').select('*').eq('quest_id', q.id),
     sb.rpc('round_status', { p_quest: q.id }),
     sb.from('date_votes').select('*').eq('quest_id', q.id),
   ]);
+  S.bs = { id: q.id, picks: picks || [], fired: fired || [], votes: votes || [] };
+  return renderBattleship(q);
+}
+
+async function renderBattleship(q) {
+  const { picks, fired, votes } = S.bs;
   const ms = qMembers(q.id);
-  const firedIds = new Set((fired || []).map((r) => r.user_id));
-  const myCur = (picks || []).find((p) => p.user_id === me() && p.round === q.round);
-  if (!S.picks[q.id] || S.picks[q.id].round !== q.round) S.picks[q.id] = { round: q.round, set: new Set(myCur?.dates || []) };
-  const sel = S.picks[q.id].set;
-  // other people's picks from earlier (missed) rounds — names show on the calendar
+  const firedIds = new Set(fired.map((r) => r.user_id));
+  const myCur = picks.find((p) => p.user_id === me() && p.round === q.round);
+  if (!S.picks[q.id] || S.picks[q.id].round !== q.round) {
+    const map = {}; (myCur ? pickKeys(myCur) : []).forEach((key) => { const [d, k] = key.split('@'); (map[d] = map[d] || new Set()).add(k); });
+    S.picks[q.id] = { round: q.round, map, open: null };
+  }
+  const st = S.picks[q.id], sel = st.map;
+  const dayCount = Object.values(sel).filter((x) => x.size).length;
+  // other people's picks from earlier (missed) rounds — who could do which day and time
   const reveal = {};
   const showRound = q.phase === 'pick' && q.status === 'gathering' ? q.round - 1 : q.round;
-  (picks || []).filter((p) => p.user_id !== me() && p.round === showRound).forEach((p) => {
-    p.dates.forEach((d) => { (reveal[d] = reveal[d] || new Set()).add(person(p.user_id).name.slice(0, 3)); });
+  picks.filter((p) => p.user_id !== me() && p.round === showRound).forEach((p) => {
+    pickKeys(p).forEach((key) => { const [d, k] = key.split('@'); reveal[d] = reveal[d] || {}; (reveal[d][k] = reveal[d][k] || []).push(person(p.user_id).name); });
   });
+  const revealNames = (d) => [...new Set(Object.values(reveal[d] || {}).flat())].map((n) => n.slice(0, 3)).join(' ');
   const today = ymd(new Date());
   const lockedDay = q.starts_at ? ymd(new Date(q.starts_at)) : null;
   const months = [];
   let cur = parseYMD(q.period_start); const end = parseYMD(q.period_end);
   while (cur <= end) { months.push(new Date(cur)); cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1); }
   const canPick = q.status === 'gathering' && q.phase === 'pick' && myQM(q.id);
+  const dayPanel = (d) => {
+    const mine = sel[d] || new Set(), last = reveal[d] || {};
+    return `<div class="slotbox"><div class="row"><div class="f grow" style="font-size:17px">${fmtDay(d)} · when can you do?</div><button class="btn sm" data-act="dayClose" data-id="${q.id}" aria-label="Close">✕</button></div>
+      <div class="slots">${SLOTS.map(([k, n, t]) => `<button class="slot ${mine.has(k) ? 'on' : ''}" data-act="slot" data-id="${q.id}" data-d="${d}" data-s="${k}" aria-pressed="${mine.has(k)}"><b>${n}</b><span>${t}</span>${last[k] ? `<em>${esc(last[k].join(', '))}</em>` : ''}</button>`).join('')}</div>
+      <div class="row" style="gap:6px"><button class="btn sm grow" data-act="slotAll" data-id="${q.id}" data-d="${d}">All day</button><button class="btn sm no grow" data-act="slotNone" data-id="${q.id}" data-d="${d}">Can't do this day</button></div>
+      ${Object.keys(last).length ? '<div class="small muted">Names under a time = who could do it last round.</div>' : ''}</div>`;
+  };
   const cal = months.map((m) => {
     const first = new Date(m.getFullYear(), m.getMonth(), 1), days = new Date(m.getFullYear(), m.getMonth() + 1, 0).getDate();
     const lead = (first.getDay() + 6) % 7;
     let cells = ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((w) => `<div class="wd">${w}</div>`).join('') + '<div></div>'.repeat(lead);
+    let openHere = false;
     for (let i = 1; i <= days; i++) {
       const ds = ymd(new Date(m.getFullYear(), m.getMonth(), i));
-      const cls = [sel.has(ds) && q.phase === 'pick' ? 'mine' : '', ds < today ? 'past' : '', ds === lockedDay ? 'locked' : ''].join(' ');
-      cells += `<button class="cell ${cls}" ${canPick ? `data-act="pick" data-id="${q.id}" data-d="${ds}"` : 'disabled'} aria-pressed="${sel.has(ds)}">${i}<small>${reveal[ds] ? esc([...reveal[ds]].join(' ')) : ''}</small></button>`;
+      const mine = q.phase === 'pick' ? (sel[ds] || new Set()) : new Set();
+      if (st.open === ds) openHere = true;
+      const cls = [mine.size ? 'mine' : '', ds < today ? 'past' : '', ds === lockedDay ? 'locked' : '', st.open === ds ? 'open' : ''].join(' ');
+      const bars = mine.size ? `<span class="sbars">${SLOTS.map(([k]) => `<i class="${mine.has(k) ? 'on' : ''}"></i>`).join('')}</span>` : '';
+      cells += `<button class="cell ${cls}" ${canPick ? `data-act="pick" data-id="${q.id}" data-d="${ds}"` : 'disabled'} aria-pressed="${mine.size > 0}" aria-label="${fmtDay(ds)}${mine.size ? ': ' + [...mine].map((k) => SLOT_NAME[k]).join(', ') : ''}">${i}${bars}<small>${esc(revealNames(ds))}</small></button>`;
     }
-    return `<div class="win"><div class="bar">${m.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' })}</div><div class="cal">${cells}</div></div>`;
+    return `<div class="win"><div class="bar">${m.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' })}</div><div class="cal">${cells}</div>${openHere && canPick ? dayPanel(st.open) : ''}</div>`;
   }).join('');
   const waiting = ms.filter((m) => !firedIds.has(m.user_id)).map((m) => person(m.user_id).name);
   let panel = '';
   if (q.status === 'gathering' && q.phase === 'pick') {
-    panel = `${q.round > 1 ? `<div class="win pad" style="background:#FFE3E3"><div class="f" style="font-size:18px;color:#C92A2A">No match in round ${q.round - 1}</div><div class="small">Names on each day show who could make it last round. Pick again.</div></div>` : ''}
-      ${myQM(q.id) ? `<button class="btn orange block" data-act="fire" data-id="${q.id}" style="font-size:20px">${firedIds.has(me()) ? 'Update my picks' : 'Submit my picks'} (${sel.size} picked)</button>` : ''}
+    panel = `${q.round > 1 ? `<div class="win pad" style="background:#FFE3E3"><div class="f" style="font-size:18px;color:#C92A2A">No match in round ${q.round - 1}</div><div class="small">Names on each day show who could make it last round. Tap a day to see who could do which time. Pick again.</div></div>` : ''}
+      ${myQM(q.id) ? `<button class="btn orange block" data-act="fire" data-id="${q.id}" style="font-size:20px">${firedIds.has(me()) ? 'Update my picks' : 'Submit my picks'} (${dayCount} day${dayCount === 1 ? '' : 's'})</button>` : ''}
       <div class="muted center small">${waiting.length ? `Waiting on: ${esc(waiting.join(', '))}` : 'Everyone has picked.'}</div>`;
   } else if (q.status === 'gathering' && q.phase === 'vote') {
-    const counts = {}; (votes || []).forEach((v) => { (counts[v.vote] = counts[v.vote] || []).push(person(v.user_id).name); });
-    const myVote = (votes || []).find((v) => v.user_id === me())?.vote;
-    panel = `<div class="win pad stack"><div class="f" style="font-size:20px;color:#C2410C">A few dates work — vote for one</div>
-      ${(q.shortlist || []).map((d) => `<button class="btn ${myVote === d ? 'sun' : ''}" data-act="vote" data-id="${q.id}" data-d="${d}">${fmtDay(d)} · ${(counts[d] || []).length} vote${(counts[d] || []).length === 1 ? '' : 's'}${counts[d] ? ` <span class="small">(${esc(counts[d].join(', '))})</span>` : ''}</button>`).join('')}
-      <div class="small muted">Voting closes ${fmtDT(q.deadline)}. No agreement? The earliest most-voted date wins.</div></div>`;
+    const slotted = !!q.shortlist_slots;
+    const opts = slotted ? q.shortlist_slots : (q.shortlist || []);
+    const vk = (v) => (slotted ? v.vote_slot : v.vote);
+    const counts = {}; votes.forEach((v) => { if (vk(v)) (counts[vk(v)] = counts[vk(v)] || []).push(person(v.user_id).name); });
+    const myVote = votes.find((v) => v.user_id === me()); const mv = myVote ? vk(myVote) : null;
+    panel = `<div class="win pad stack"><div class="f" style="font-size:20px;color:#C2410C">A few times work — vote for one</div>
+      ${opts.map((o) => `<button class="btn ${mv === o ? 'sun' : ''}" data-act="vote" data-id="${q.id}" data-d="${o}">${slotted ? slotLine(o) : fmtDay(o)} · ${(counts[o] || []).length} vote${(counts[o] || []).length === 1 ? '' : 's'}${counts[o] ? ` <span class="small">(${esc(counts[o].join(', '))})</span>` : ''}</button>`).join('')}
+      <div class="small muted">Voting closes ${fmtDT(q.deadline)}. No agreement? The earliest most-voted time wins.</div></div>`;
   } else if (q.status === 'formed') {
-    panel = `<div class="win pad center" style="background:#EBFBEE"><div class="f" style="font-size:24px;color:#2B8A3E">Locked in: ${fmtDT(q.starts_at)}</div><div class="small" style="margin:4px 0 8px">Locked in · ${ms.filter((m) => m.response === 'accept').length} going · streak ×${q.streak + 1} if it happens</div>${formedTools(q)}</div>`;
+    panel = `<div class="win pad center" style="background:#EBFBEE"><div class="f" style="font-size:24px;color:#2B8A3E">Locked in: ${fmtDT(q.starts_at)}</div><div class="small" style="margin:4px 0 8px">${q.slot ? `${SLOT_NAME[q.slot]} (${SLOT_TIME[q.slot]}) · ` : ''}${ms.filter((m) => m.response === 'accept').length} going · streak ×${q.streak + 1} if it happens</div>${formedTools(q)}</div>`;
   } else {
     panel = `<div class="win pad center" style="background:#FFE3E3"><div class="f" style="font-size:20px;color:#C92A2A">${q.status === 'cancelled' ? 'Cancelled — streak broken' : q.status === 'failed' ? 'No date found — streak broken' : 'Party Quest complete'}</div></div>`;
   }
   paint(`<div class="stack">${header('Date Selection', '#/', `<span class="chip">Round ${q.round}</span>`)}
     <div class="win"><div class="bar">${esc(q.title)} <span style="margin-left:auto;color:#C2410C">Streak ×${q.streak}</span></div><div class="pad stack" style="gap:6px">
-      <div class="small"><b>Need ${q.min_players} of ${ms.length} free</b>${q.status === 'gathering' ? ` · ${q.phase === 'pick' ? 'picks' : 'voting'} close ${fmtDT(q.deadline)}` : ''}${q.location ? ' · ' + esc(q.location) : ''}</div>
+      <div class="small"><b>Need ${q.min_players} of ${ms.length} free at the same time</b>${q.status === 'gathering' ? ` · ${q.phase === 'pick' ? 'picks' : 'voting'} close ${fmtDT(q.deadline)}` : ''}${q.location ? ' · ' + esc(q.location) : ''}</div>
       <div class="row" style="flex-wrap:wrap;gap:6px">${ms.map((m) => `<span class="chip ${firedIds.has(m.user_id) ? 'ok' : 'wait'}">${esc(person(m.user_id).name)} · ${firedIds.has(m.user_id) ? 'picked' : 'picking'}</span>`).join('')}</div>
     </div></div>
-    ${canPick ? '<div class="muted small">Tap every day you can do. Others\' picks stay hidden until the round is over.</div>' : ''}
+    ${canPick ? '<div class="muted small">Tap a day, then tick the times you can do. Others\' picks stay hidden until the round is over.</div>' : ''}
     ${cal}
     ${panel}
     ${(['formed', 'done'].includes(q.status) && new Date(q.starts_at) < new Date(Date.now() + 36e5)) ? await photoSection(q) : ''}
     ${q.created_by === me() && ['gathering', 'formed'].includes(q.status) ? `<button class="btn no sm" data-act="cancelQuest" data-id="${q.id}" style="align-self:center">Cancel this round</button>` : ''}
   </div>`, 'quests');
+}
+// Re-draw Date Selection from cached data (no network) and keep the scroll position
+async function redrawBS(id) {
+  const q = S.d.quests.find((x) => x.id === id); if (!q || S.bs?.id !== id) return;
+  const y = window.scrollY; await renderBattleship(q); window.scrollTo(0, y);
 }
 
 // ───────────── screens: pacts ─────────────
@@ -600,7 +637,7 @@ const A = {
       const id = await rpc('create_quest', {
         p_crew: S.crew.id, p_title: title, p_location: v('nq-loc')?.trim() || null, p_kind: kind,
         p_starts_at: kind === 'once' ? new Date(v('nq-when')).toISOString() : null,
-        p_repeat_months: kind === 'recurring' ? Number(v('nq-rep')) : null, p_time: kind === 'recurring' ? v('nq-time') : null,
+        p_repeat_months: kind === 'recurring' ? Number(v('nq-rep')) : null, p_time: null,
         p_min: nqMin, p_deadline: new Date(v('nq-dl')).toISOString(), p_members: [...nqPicked],
       });
       nqPicked = null; toast('Party Quest posted!'); location.hash = '#/quest/' + id;
@@ -625,17 +662,23 @@ const A = {
     catch { el.disabled = false; }
   },
   async cancelQuest(el) { if (!confirm('Cancel this Party Quest for everyone?')) return; await rpc('cancel_quest', { p_quest: el.dataset.id }); toast('Party Quest cancelled'); await refresh(); },
-  pick(el) { const s = S.picks[el.dataset.id].set, d = el.dataset.d; s.has(d) ? s.delete(d) : s.add(d); el.classList.toggle('mine', s.has(d)); el.setAttribute('aria-pressed', s.has(d)); const f = document.querySelector('[data-act="fire"]'); if (f) f.textContent = f.textContent.replace(/\(\d+ picked\)/, `(${s.size} picked)`); },
+  pick(el) { const st = S.picks[el.dataset.id]; st.open = st.open === el.dataset.d ? null : el.dataset.d; redrawBS(el.dataset.id); },
+  dayClose(el) { S.picks[el.dataset.id].open = null; redrawBS(el.dataset.id); },
+  slot(el) { const m = S.picks[el.dataset.id].map, d = el.dataset.d, k = el.dataset.s; const set = (m[d] = m[d] || new Set()); set.has(k) ? set.delete(k) : set.add(k); redrawBS(el.dataset.id); },
+  slotAll(el) { S.picks[el.dataset.id].map[el.dataset.d] = new Set(SLOTS.map(([k]) => k)); redrawBS(el.dataset.id); },
+  slotNone(el) { const st = S.picks[el.dataset.id]; delete st.map[el.dataset.d]; st.open = null; redrawBS(el.dataset.id); },
   async fire(el) {
-    const set = S.picks[el.dataset.id].set; if (!set.size && !confirm('Submit with no days picked? That means you can\'t make any.')) return;
+    const keys = Object.entries(S.picks[el.dataset.id].map).flatMap(([d, set]) => [...set].map((k) => `${d}@${k}`)).sort();
+    if (!keys.length && !confirm('Submit with no days picked? That means you can\'t make any.')) return;
     el.disabled = true;
     try {
-      const r = await rpc('submit_picks', { p_quest: el.dataset.id, p_dates: [...set].sort() });
-      toast({ waiting: 'Picks in! Waiting for the others…', miss: 'No match yet — next round', hit: 'Date locked in!', vote: 'A few dates work — time to vote' }[r] || 'Picks in!');
+      const r = await rpc('submit_slots', { p_quest: el.dataset.id, p_slots: keys });
+      S.picks[el.dataset.id].open = null;
+      toast({ waiting: 'Picks in! Waiting for the others…', miss: 'No match yet — next round', hit: 'Date locked in!', vote: 'A few times work — time to vote' }[r] || 'Picks in!');
       await refresh();
     } catch { el.disabled = false; }
   },
-  async vote(el) { await rpc('vote_date', { p_quest: el.dataset.id, p_date: el.dataset.d }); toast('Vote cast'); await refresh(); },
+  async vote(el) { const o = el.dataset.d; await (o.includes('@') ? rpc('vote_slot', { p_quest: el.dataset.id, p_slot: o }) : rpc('vote_date', { p_quest: el.dataset.id, p_date: o })); toast('Vote cast'); await refresh(); },
   gcal(el) { const q = S.d.quests.find((x) => x.id === el.dataset.id), e = calEvent(q); window.open(`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(e.text)}&dates=${e.z(e.start)}/${e.z(e.end)}&location=${encodeURIComponent(e.loc)}&details=${encodeURIComponent(e.details)}`, '_blank'); },
   ics(el) {
     const q = S.d.quests.find((x) => x.id === el.dataset.id), e = calEvent(q);
@@ -736,7 +779,9 @@ async function backgroundRefresh() {
   await loadCrew();
   if (JSON.stringify(S.d) === before) return;
   if (isEditing()) { document.querySelector('.tabs')?.replaceWith(Object.assign(document.createElement('div'), { innerHTML: tabs(currentTab()) }).firstElementChild); return; }
+  const y = window.scrollY, h = location.hash;
   await render();
+  if (location.hash === h) window.scrollTo(0, y);  // live update: stay where you were
 }
 const currentTab = () => ({ '': 'home', quests: 'quests', 'new-quest': 'quests', quest: 'quests', pacts: 'pacts', 'new-pact': 'pacts', pact: 'pacts', checkin: 'pacts', archive: 'archive', alerts: 'alerts' }[location.hash.replace(/^#\/?/, '').split(/[/?]/)[0]] || 'home');
 window.addEventListener('hashchange', async () => {

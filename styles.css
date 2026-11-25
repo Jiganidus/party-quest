@@ -82,3 +82,16 @@ body.night .cloud{display:none}
 .picks{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:8px}
 .pick{background:#fff;border:2px solid #C9B48A;border-radius:12px;padding:6px 4px;display:flex;flex-direction:column;align-items:center;gap:2px;font:700 11px Nunito,sans-serif;color:var(--ink);cursor:pointer}
 .pick.on{border-color:var(--ink);background:#FFE7A8;box-shadow:0 2px 0 var(--ink)}
+/* Date Selection time slots */
+.cell{position:relative}
+.cell.open{outline:3px solid #F59F00;outline-offset:1px}
+.sbars{display:flex;gap:2px;margin-top:2px}
+.sbars i{width:5px;height:4px;border-radius:2px;background:rgba(255,255,255,.35)}
+.sbars i.on{background:#FFD43B}
+.slotbox{border-top:2px dashed #C9B48A;padding:10px;display:flex;flex-direction:column;gap:8px;background:#FFF8E6}
+.slots{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:6px}
+.slot{border:2px solid #C9B48A;border-radius:10px;background:#fff;padding:6px 4px;display:flex;flex-direction:column;align-items:center;gap:1px;cursor:pointer;color:var(--ink);font:600 12px Nunito,sans-serif}
+.slot b{font:600 15px Fredoka,sans-serif}
+.slot em{font-style:normal;font-size:10px;color:#C2410C;text-align:center;line-height:1.1}
+.slot.on{background:#4A6CF7;border-color:#1F3FB8;color:#fff}
+.slot.on em{color:#FFE066}
